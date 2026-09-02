@@ -1,0 +1,22 @@
+{
+  "name": "passkify-monorepo",
+  "private": true,
+  "description": "Monorepo for the passkify library and its documentation site.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w passkify-docs",
+    "build": "npm run build -w passkify",
+    "build:docs": "npm run build -w passkify-docs",
+    "test": "npm test -w passkify",
+    "typecheck": "npm run typecheck -w passkify && npm run typecheck -w passkify-docs",
+    "verify": "npm run verify -w passkify-docs",
+    "release": "npm publish -w passkify"
+  }
+}
