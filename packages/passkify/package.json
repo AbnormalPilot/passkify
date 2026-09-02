@@ -1,0 +1,73 @@
+{
+  "name": "passkify",
+  "version": "0.1.0",
+  "description": "Add passkeys (WebAuthn) to your website in a few lines. Zero runtime dependencies, client + server included.",
+  "keywords": [
+    "passkey",
+    "passkeys",
+    "webauthn",
+    "fido2",
+    "authentication",
+    "passwordless",
+    "login",
+    "auth"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/USER/passkify.git",
+    "directory": "packages/passkify"
+  },
+  "homepage": "https://passkify.himanshubuilds.in",
+  "bugs": {
+    "url": "https://github.com/USER/passkify/issues"
+  },
+  "author": "",
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/esm/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
+    },
+    "./server": {
+      "types": "./dist/esm/server/index.d.ts",
+      "import": "./dist/esm/server/index.js",
+      "require": "./dist/cjs/server/index.js"
+    },
+    "./client": {
+      "types": "./dist/esm/client/index.d.ts",
+      "import": "./dist/esm/client/index.js",
+      "require": "./dist/cjs/client/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "npm run build && node --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "build": "node scripts/build.mjs",
+    "prepublishOnly": "npm run typecheck && npm test",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\""
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}
