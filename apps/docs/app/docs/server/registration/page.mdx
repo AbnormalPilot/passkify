@@ -1,0 +1,251 @@
+export const metadata = {
+  title: 'Registration',
+  description: 'startRegistration and finishRegistration, and the fifteen checks in between.',
+};
+
+Creating a passkey. Two calls: one to issue options, one to verify what comes
+back.
+
+## startRegistration
+
+<ApiMethod
+  name="startRegistration"
+  signature="startRegistration(input: StartRegistrationInput): Promise<StartRegistrationResult>"
+>
+
+Issues creation options for the browser. Send `result.options` across
+untouched; the client library converts it to the WebAuthn shape at the last
+moment.
+
+<PropList>
+  <Prop name="username" type="string" >
+    The username for a **new** account. Mutually exclusive with `userId`.
+  </Prop>
+  <Prop name="displayName" type="string" defaultValue="username">
+    Shown in the operating system's passkey picker. This is the label a user
+    sees months later when choosing between saved passkeys, so use something
+    human.
+  </Prop>
+  <Prop name="userId" type="string">
+    An existing account's user handle, taken from the caller's **authenticated
+    session**, to let a signed-in user add another device.
+  </Prop>
+  <Prop name="userVerification" type="'required' | 'preferred' | 'discouraged'" defaultValue="config value">
+    Override the configured policy for this one ceremony. Recorded with the
+    challenge, so `finishRegistration` enforces the same policy the ceremony
+    was started under.
+  </Prop>
+</PropList>
+
+<Returns type="{ options: RegistrationOptionsJSON; userId: string; isNewUser: boolean }">
+`userId` is the handle these options were issued for. `isNewUser` is `true`
+when a successful ceremony will create an account.
+</Returns>
+
+<Throws>
+<Throw code="credential_exists">
+The username is already taken. See below.
+</Throw>
+<Throw code="unknown_user">
+`userId` was given but no such account exists.
+</Throw>
+<Throw code="malformed_response">
+Neither `username` nor `userId` was supplied.
+</Throw>
+<Throw code="configuration_error">
+The account's ID exceeds 64 bytes when UTF-8 encoded, which WebAuthn does not
+allow for a user handle.
+</Throw>
+</Throws>
+
+</ApiMethod>
+
+### Two ways to call it, and why they are separate
+
+<Contrast>
+<ContrastItem tone="good" title="New account: by username">
+
+```js
+const { options } = await passkeys.startRegistration({
+  username: 'ada',
+});
+```
+
+Throws `credential_exists` if `ada` already exists.
+
+</ContrastItem>
+<ContrastItem tone="good" title="Existing account: by session">
+
+```js
+const { options } = await passkeys.startRegistration({
+  userId: req.session.userId,   // never from the body
+});
+```
+
+Excludes credentials already on the account.
+
+</ContrastItem>
+</Contrast>
+
+<Callout type="danger" title="Never let an unauthenticated request name the account">
+If a request body can say which existing account a new passkey attaches to,
+then anyone who knows a username owns that account: they register their own
+passkey against it and sign in as its owner.
+
+This is the single most common way to get a passkey integration
+catastrophically wrong. passkify makes it hard to express: the `username` form
+refuses existing accounts outright, and the
+[mounted routes](/docs/server/adapters) ignore a username in the body whenever
+a session is present.
+</Callout>
+
+<Reason title="Why the account is not created until the ceremony finishes">
+`startRegistration({ username })` does not touch your users table. It mints a
+user handle, records it with the challenge, and returns.
+
+If it created the row up front, every abandoned prompt, and users abandon
+plenty, would leave a half-registered account with no credential attached.
+Those accounts are worse than useless: they occupy the username, so the user
+who closed the dialog by accident can never sign up with it again.
+
+The account is created inside `finishRegistration`, after every check passes.
+</Reason>
+
+### What the options contain
+
+```js
+{
+  rp: { id: 'acme.com', name: 'Acme' },
+  user: { id: '<base64url user handle>', name: 'ada', displayName: 'Ada Lovelace' },
+  challenge: '<43 base64url characters>',
+  pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+  timeout: 60000,
+  excludeCredentials: [],
+  authenticatorSelection: {
+    residentKey: 'preferred',
+    requireResidentKey: false,
+    userVerification: 'preferred',
+  },
+  attestation: 'none',
+}
+```
+
+<Reason title="Why excludeCredentials matters">
+It lists the credentials the account already has, so the authenticator can
+refuse to create a duplicate. Without it, a user who taps "register" twice ends
+up with two passkeys on the same device, and the picker at login shows two
+identical-looking entries.
+
+When the authenticator declines, the browser raises `InvalidStateError`, which
+`passkify/client` surfaces as
+[`already_registered`](/docs/errors#already_registered). Treat that as
+information, not an error: show "this device already has a passkey for your
+account".
+</Reason>
+
+## finishRegistration
+
+<ApiMethod
+  name="finishRegistration"
+  signature="finishRegistration(response: RegistrationResponseJSON): Promise<VerifyRegistrationResult>"
+>
+
+Verifies the browser's response, creates the account if needed, and stores the
+credential.
+
+<Returns type="{ verified: true; user; credential; isNewUser; attestation }">
+Always `verified: true`. Any failure throws instead.
+</Returns>
+
+```js
+const result = await passkeys.finishRegistration(responseFromBrowser);
+
+result.user;               // { id, username, displayName }
+result.credential.id;      // base64url credential ID
+result.credential.deviceType;  // 'multiDevice' | 'singleDevice'
+result.isNewUser;          // true if this ceremony created the account
+result.attestation.format; // 'none' for most consumer passkeys
+```
+
+</ApiMethod>
+
+### The fifteen checks
+
+In WebAuthn §7.1 order. Each one has a test that tampers with exactly that
+field and asserts the matching code.
+
+| # | Check | Failure code |
+| --- | --- | --- |
+| 1 | Challenge exists, unexpired, consumed on read | `challenge_not_found` |
+| 2 | Challenge was issued for a registration | `type_mismatch` |
+| 3 | Signed challenge equals the issued one, compared in constant time | `challenge_mismatch` |
+| 4 | `clientData.type` is `webauthn.create` | `type_mismatch` |
+| 5 | `clientData.origin` is allowed | `origin_mismatch` |
+| 6 | Not run inside a cross-origin frame | `origin_mismatch` |
+| 7 | `rpIdHash` equals SHA-256 of the configured `rpID` | `rpid_mismatch` |
+| 8 | User-present flag set | `user_not_present` |
+| 9 | User-verified flag set, when required | `user_not_verified` |
+| 10 | Backup-state flag not set without backup-eligible | `parse_error` |
+| 11 | Attested credential data present and well formed | `parse_error` |
+| 12 | `rawId` matches the credential ID inside the authenticator data | `malformed_response` |
+| 13 | Public key parses and its algorithm was offered | `unsupported_algorithm` |
+| 14 | Attestation statement verifies, if one was sent | `attestation_failed` |
+| 15 | Credential ID is not already registered to anyone | `credential_exists` |
+
+<Reason title="Why check 15 spans all users, not just this one">
+A credential ID is globally unique by construction. If one arrives that is
+already in your database under a different account, something is wrong that a
+per-user check would miss entirely: a replayed registration, a store bug, or a
+deliberate attempt to bind one authenticator to two accounts.
+
+Scoping the uniqueness check to the current user would let that through
+silently, and the second account would then be signed into by whoever holds the
+first credential.
+</Reason>
+
+### Handling the result
+
+```js
+app.post('/passkey/register/finish', async (req, res) => {
+  try {
+    const { user, isNewUser } = await passkeys.finishRegistration(req.body);
+
+    req.session.userId = user.id;      // log them straight in
+    res.json({ ok: true, isNewUser });
+  } catch (error) {
+    if (error instanceof PasskeyError) {
+      return res.status(error.status).json(error.toJSON());
+    }
+    throw error;
+  }
+});
+```
+
+Or skip the route entirely and use an [adapter](/docs/server/adapters).
+
+## Adding a second passkey
+
+Worth prompting for at signup. A user with one device-bound passkey is one lost
+phone away from losing the account.
+
+```js
+// Route protected by your existing session middleware.
+app.post('/settings/passkeys/start', requireAuth, async (req, res) => {
+  const { options } = await passkeys.startRegistration({
+    userId: req.session.userId,
+  });
+  res.json(options);
+});
+```
+
+```js
+// Browser, already signed in.
+import { register } from 'passkify/client';
+await register();   // no username: adds to the current account
+```
+
+## Next
+
+- [Authentication](/docs/server/authentication) for the login side.
+- [Credential management](/docs/server/credentials) to list and revoke.
+- [Errors](/docs/errors) for every code above.

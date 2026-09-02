@@ -1,0 +1,259 @@
+export const metadata = {
+  title: 'Low-level primitives',
+  description: 'CBOR, COSE keys, authenticator data. For tooling, not for websites.',
+};
+
+<Callout type="warning" title="You almost certainly do not need these">
+The four ceremony methods are the API. These exports exist for people building
+something unusual: an authenticator emulator, a migration script off another
+library, a debugging tool, a conformance harness.
+
+Using them to hand-roll a ceremony means re-implementing the checks that make a
+ceremony mean anything. Do not.
+</Callout>
+
+```js
+import {
+  parseAuthenticatorData, parseClientData,
+  parseCOSEPublicKey, verifySignature, algorithmName,
+  decodeCBOR, decodeCBORFirst,
+  toBase64Url, fromBase64Url,
+} from 'passkify';
+```
+
+## CBOR
+
+<ApiMethod
+  name="decodeCBOR"
+  signature="decodeCBOR(bytes: Uint8Array): CBORValue"
+  advanced
+>
+
+Decode exactly one CBOR item, rejecting trailing bytes.
+
+</ApiMethod>
+
+<ApiMethod
+  name="decodeCBORFirst"
+  signature="decodeCBORFirst(bytes: Uint8Array): { value: CBORValue; bytesRead: number }"
+  advanced
+>
+
+Decode the first item and report how many bytes it consumed.
+
+<Reason title="Why this variant has to exist">
+A COSE public key sits inside authenticator data with optional extension data
+glued directly after it, and no length prefix separating them. The only way to
+find the boundary is to parse the key and see where it ended.
+</Reason>
+
+</ApiMethod>
+
+### What the parser refuses
+
+It sits directly on attacker-controlled bytes, so it is deliberately strict:
+
+<PropList>
+  <Prop name="Nesting deeper than 32 levels" type="rejected">
+    A recursive-descent parser on unbounded nesting is a stack overflow waiting
+    to be triggered.
+  </Prop>
+  <Prop name="Lengths that exceed the buffer" type="rejected before allocating">
+    A three-byte header can claim a four-billion-element array. Checking the
+    declared count against the bytes actually remaining turns that from an
+    out-of-memory kill into a parse error.
+  </Prop>
+  <Prop name="Duplicate map keys" type="rejected">
+    A classic parser-differential: two implementations disagree about which
+    value wins, and a signature checked over one reading is applied to the
+    other.
+  </Prop>
+  <Prop name="Trailing bytes" type="rejected by decodeCBOR">
+    Unconsumed input means the sender and the parser disagree about the
+    message, which is never benign here.
+  </Prop>
+  <Prop name="Malformed UTF-8 in text strings" type="rejected">
+    Decoded with `fatal: true` rather than substituting replacement characters.
+  </Prop>
+  <Prop name="Integers beyond 2^53" type="surfaced as bigint">
+    Silently losing precision on a length or an algorithm identifier would be
+    worse than an awkward type.
+  </Prop>
+</PropList>
+
+Indefinite-length items **are** accepted, even though CTAP2 canonical CBOR
+forbids them, because a few real authenticators emit them and rejecting would
+lock those users out for no security gain.
+
+## Authenticator data
+
+<ApiMethod
+  name="parseAuthenticatorData"
+  signature="parseAuthenticatorData(bytes: Uint8Array): ParsedAuthenticatorData"
+  advanced
+>
+
+```ts
+interface ParsedAuthenticatorData {
+  rpIdHash: Uint8Array;
+  flags: {
+    userPresent: boolean;
+    userVerified: boolean;
+    backupEligible: boolean;
+    backedUp: boolean;
+    attestedCredentialData: boolean;
+    extensionData: boolean;
+  };
+  rawFlags: number;
+  signCount: number;
+  attestedCredentialData?: {
+    aaguid: Uint8Array;
+    credentialId: Uint8Array;
+    credentialPublicKey: Uint8Array;
+  };
+  extensions?: CBORMap;
+  bytes: Uint8Array;
+}
+```
+
+The byte layout it walks:
+
+```
+ 32  rpIdHash
+  1  flags
+  4  signCount (big-endian)
+ -- if the AT flag is set --
+ 16  aaguid
+  2  credentialIdLength
+  L  credentialId
+  ?  credentialPublicKey (CBOR, self-delimiting)
+ -- if the ED flag is set --
+  ?  extensions (CBOR map)
+```
+
+<Reason title="Why bytes is returned alongside the parsed fields">
+The signature is computed over the raw authenticator data concatenated with the
+client data hash. Re-serialising the parsed struct would not reproduce those
+bytes exactly, and any difference makes every signature fail. Keeping the
+original is the only correct option.
+</Reason>
+
+</ApiMethod>
+
+## Client data
+
+<ApiMethod
+  name="parseClientData"
+  signature="parseClientData(bytes: Uint8Array): ClientData"
+  advanced
+>
+
+```ts
+interface ClientData {
+  type: string;
+  challenge: Base64URLString;
+  origin: string;
+  crossOrigin?: boolean;
+  topOrigin?: string;
+  tokenBinding?: { status: string; id?: string };
+}
+```
+
+Parses and shape-checks only. It does not validate the origin or the challenge;
+that is the ceremony's job.
+
+</ApiMethod>
+
+## COSE keys
+
+<ApiMethod
+  name="parseCOSEPublicKey"
+  signature="parseCOSEPublicKey(coseBytes: Uint8Array): ParsedCOSEKey"
+  advanced
+>
+
+```ts
+interface ParsedCOSEKey {
+  alg: number;         // COSE identifier, -7 for ES256
+  algName: string;     // 'ES256'
+  key: KeyObject;      // Node public key, ready to verify with
+}
+```
+
+<Reason title="Why it converts to JWK rather than building SPKI DER by hand">
+Handing a JWK to `crypto.createPublicKey` puts curve membership and point
+validation inside OpenSSL. Hand-assembling DER would mean writing that
+validation in JavaScript, which is exactly the kind of code that looks correct
+and accepts an invalid point.
+</Reason>
+
+Defensive details worth knowing if you are reading the source:
+
+- EC coordinates shorter than the curve width are **left-padded**, because some
+  authenticators trim leading zero bytes and JWK requires the full width.
+  Anything longer than the curve is rejected.
+- RSA moduli and exponents have leading zeros stripped, as JWK requires
+  minimal-length big-endian integers.
+- RSA moduli below 2048 bits are refused outright.
+- The algorithm in the key must match the key type, and for EC algorithms the
+  curve is pinned to the one the specification assigns.
+
+</ApiMethod>
+
+<ApiMethod
+  name="verifySignature"
+  signature="verifySignature(key: ParsedCOSEKey, data: Uint8Array, signature: Uint8Array): boolean"
+  advanced
+>
+
+Returns a boolean rather than throwing.
+
+<Reason>
+"Did not verify" is an expected outcome, not an exceptional one. OpenSSL throws
+on a structurally invalid signature, such as malformed ECDSA DER; that is a
+failed verification, not a server fault, so it is caught and returned as
+`false`. Genuine problems, like an unusable key, still throw.
+</Reason>
+
+</ApiMethod>
+
+<ApiMethod
+  name="algorithmName"
+  signature="algorithmName(alg: number): string | undefined"
+  advanced
+>
+
+The printable name of a COSE algorithm, or `undefined` if unknown. Useful for
+logging what an authenticator actually used.
+
+</ApiMethod>
+
+## Encoding
+
+<ApiMethod name="toBase64Url" signature="toBase64Url(input: Uint8Array | ArrayBuffer): string" advanced />
+
+<ApiMethod name="fromBase64Url" signature="fromBase64Url(input: string): Uint8Array" advanced />
+
+Unpadded base64url. Decoding accepts padding and the standard `+/` alphabet,
+because that is what real authenticators and browsers produce.
+
+<Reason title="Why these are hand-rolled rather than using Buffer or atob">
+The same code runs in the browser, Node, Deno, Bun and edge runtimes.
+`Buffer` does not exist in half of those, and `atob` mangles binary data unless
+you are careful in a way that is easy to get wrong once and never notice.
+</Reason>
+
+## A worked example
+
+Inspecting a credential you already have stored:
+
+```js
+import { parseCOSEPublicKey, fromBase64Url, algorithmName } from 'passkify';
+
+const credential = await store.getCredentialById(id);
+const key = parseCOSEPublicKey(fromBase64Url(credential.publicKey));
+
+console.log(algorithmName(key.alg));                    // 'ES256'
+console.log(key.key.asymmetricKeyDetails);              // { namedCurve: 'prime256v1' }
+console.log(key.key.export({ format: 'jwk' }));         // { kty: 'EC', crv: 'P-256', x, y }
+```

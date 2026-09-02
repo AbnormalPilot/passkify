@@ -1,0 +1,187 @@
+export const metadata = {
+  title: 'Quickstart',
+  description: 'A working passwordless sign-up and sign-in, end to end.',
+};
+
+A complete Express app with passwordless sign-up and sign-in. Copy it, run it,
+then replace the store.
+
+<Callout type="note" title="Prefer to read finished code, or just try it?">
+Every file of this app, plus the Next.js App Router version, is reproduced in
+full on the [examples page](/docs/examples). A working version is running at
+[/demo](/demo): it uses the published package against your own authenticator,
+so you can see the whole flow before writing anything.
+</Callout>
+
+<Steps>
+
+<Step title="Install">
+
+```bash
+npm install passkify express express-session
+```
+
+</Step>
+
+<Step title="Create the server">
+
+```js
+// server.js
+import express from 'express';
+import session from 'express-session';
+import { PasskeyServer, MemoryStore } from 'passkify';
+
+const app = express();
+app.use(express.json());
+app.use(session({ secret: 'dev-only', resave: false, saveUninitialized: false }));
+
+const passkeys = new PasskeyServer({
+  rpName: 'Acme',
+  origin: 'http://localhost:3000',   // scheme + host + port, exactly as served
+  store: new MemoryStore(),          // development only
+});
+```
+
+Three required options. `rpName` is the site name the operating system shows in
+the passkey prompt, `origin` is where your page is served from, and `store` is
+where credentials live. Everything else has a sensible default; see
+[configuration](/docs/server/configuration).
+
+</Step>
+
+<Step title="Mount the routes">
+
+```js
+app.use(
+  passkeys.express({
+    // Identifies the signed-in visitor. Enables adding a second passkey and
+    // unlocks the credential-management routes.
+    getSessionUserId: (req) => req.session.userId ?? null,
+
+    // Start a session as soon as either ceremony succeeds.
+    onRegister: (req, res, { user }) => { req.session.userId = user.id; },
+    onLogin:    (req, res, { user }) => { req.session.userId = user.id; },
+  }),
+);
+
+app.listen(3000);
+```
+
+This mounts four routes under `/passkey`. The middleware calls `next()` for
+anything else, so it is safe at the top of the stack. See
+[HTTP adapters](/docs/server/adapters) for the full route table.
+
+</Step>
+
+<Step title="Call it from the browser">
+
+```html
+<input id="username" autocomplete="username webauthn" placeholder="username">
+<button id="signup">Create account</button>
+<button id="signin">Sign in</button>
+
+<script type="module">
+  import { register, login, signInWithAutofill } from 'passkify/client';
+
+  signup.onclick = async () => {
+    await register({ username: username.value });
+    location.href = '/';
+  };
+
+  signin.onclick = async () => {
+    await login();          // no username needed
+    location.href = '/';
+  };
+
+  // Offer passkeys inside the browser's own autofill dropdown.
+  signInWithAutofill().then((r) => { if (r) location.href = '/'; }).catch(() => {});
+</script>
+```
+
+</Step>
+
+<Step title="Run it">
+
+```bash
+node server.js
+# open http://localhost:3000
+```
+
+Your browser offers Touch ID, Windows Hello, or your phone. There is no
+password field anywhere in this app.
+
+</Step>
+
+</Steps>
+
+<Callout type="note" title="Why localhost works without HTTPS">
+WebAuthn requires a secure context, and browsers classify `localhost` as one.
+Every other host needs real TLS. To test on a phone, use a tunnel; see
+[troubleshooting](/docs/guides/troubleshooting#testing-on-a-phone).
+</Callout>
+
+## What just happened
+
+<Steps>
+
+<Step title="register() asked your server for options">
+
+`POST /passkey/register/start` returned a random challenge, your `rpID`, and a
+freshly minted user handle. No account was created yet.
+
+</Step>
+
+<Step title="The browser created a key pair">
+
+After Touch ID or Windows Hello confirmed a human was present, the
+authenticator generated a key pair, kept the private half, and signed a
+statement about the ceremony.
+
+</Step>
+
+<Step title="Your server verified it and stored the public half">
+
+`POST /passkey/register/finish` ran fifteen checks, and only then created the
+account and stored the credential. An abandoned prompt leaves nothing behind.
+
+</Step>
+
+<Step title="login() did the same in reverse">
+
+The browser showed a picker of passkeys for your domain, signed a fresh
+challenge with the private key, and your server verified that signature against
+the stored public key.
+
+</Step>
+
+</Steps>
+
+There is no shared secret in that flow, so there is nothing in your database
+worth stealing and nothing for a phishing page to capture.
+
+## Before you ship
+
+<PropList>
+  <Prop name="Replace MemoryStore" type="required">
+    It loses everything on restart, and across multiple workers a challenge
+    issued by one process is invisible to the others, so roughly every other
+    login fails. See [storage](/docs/storage).
+  </Prop>
+  <Prop name="Set a real session secret" type="required">
+    From the environment, and set `cookie.secure = true` behind TLS.
+  </Prop>
+  <Prop name="Rate limit the start routes" type="recommended">
+    `/passkey/login/start` issues a challenge to anyone who asks, and each one
+    costs a store write.
+  </Prop>
+  <Prop name="Decide on account recovery" type="recommended">
+    Prompt for a second passkey at signup. See
+    [account recovery](/docs/guides/security#account-recovery).
+  </Prop>
+</PropList>
+
+## Next
+
+- [How passkeys work](/docs/how-passkeys-work) for the concepts under all this.
+- [Framework guides](/docs/guides/frameworks) for Next.js, Hono, SvelteKit and the rest.
+- [Storage](/docs/storage) to swap out `MemoryStore`.

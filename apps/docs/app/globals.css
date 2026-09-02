@@ -1,0 +1,562 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* ==========================================================================
+   Saniti design system
+
+   A dark-first editorial surface. The page defaults to near-black canvas with
+   white type and one coral-red accent that appears at most once per viewport.
+   Depth is not made with shadow: it is made by stepping tone (canvas ->
+   canvas-soft -> canvas-light) and, above all, by the hard polarity flip
+   between adjacent dark and light sections.
+
+   Type is two families and no more. The brand sans carries every running role
+   from 112px display down to 12px meta; IBM Plex Mono is a labelling system
+   only, reserved for eyebrows and small-caps captions.
+
+   Corner language is deliberately split. Marketing controls are full pills;
+   application chrome (inputs, code windows) is cut at 3-6px. The mix is what
+   separates "marketing" from "product UI" in this system's voice.
+
+   Contrast: every foreground/background pair below was measured. Two values
+   from the source spec do not clear AA and are annotated where they appear.
+   ========================================================================== */
+
+:root {
+  /* ---------------------------------------------------------- brand/accent */
+  --brand:            #f36458;  /* the single signature accent, kept scarce */
+  --brand-deep:       #dd0000;  /* error/destructive only, never a section accent */
+
+  /* --------------------------------------------------------------- surface */
+  --canvas:           #0b0b0b;  /* default dark-section ground */
+  --canvas-soft:      #212121;  /* card and panel infill inside dark sections */
+  --canvas-light:     #ffffff;  /* primary light-mode ground */
+  --canvas-paper:     #ededed;  /* warm-grey alternate light band */
+  --hairline-soft:    #353535;  /* 1px border on dark */
+  --hairline:         #ededed;  /* 1px border on light */
+  --surface-blue-bg:  #afe3ff;  /* the only chromatic surface fill */
+
+  /* ------------------------------------------------------------------ text */
+  --ink:              #0b0b0b;  /* 19.68:1 on canvas-light */
+  --ink-soft:         #212121;  /* 16.10:1 on canvas-light */
+  --graphite:         #353535;  /* 12.27:1 on canvas-light — tertiary on light */
+  --slate:            #3c4758;
+  --slate-soft:       #505b6c;
+  --mute:             #797979;  /* 4.52:1 on canvas. NOT for small text on light
+                                   (4.35:1, below AA) — use --graphite there. */
+  --ash:              #b9b9b9;  /* 10.03:1 on canvas — default dark body */
+  --on-primary:       #ffffff;  /* 19.68:1 on canvas */
+
+  /* -------------------------------------------------------------- semantic */
+  --link-blue:        #0052ef;  /* 6.08:1 on canvas-light */
+  --link-blue-soft:   #55beff;  /* 9.56:1 on canvas */
+  --success:          #37cd84;  /* 9.59:1 on canvas */
+  --error:            #dd0000;
+
+  /* --------------------------------------------------------------- spacing */
+  --space-xxs: 4px;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-xxl: 48px;
+  --space-section: 64px;
+  --space-section-lg: 96px;
+
+  /* ---------------------------------------------------------------- radius */
+  --rounded-none: 0px;
+  --rounded-app-xs: 3px;   /* text inputs */
+  --rounded-app-sm: 4px;   /* chips, secondary inputs */
+  --rounded-app-md: 5px;   /* toolbar buttons, tab pills */
+  --rounded-app-lg: 6px;   /* code windows, app mockups */
+  --rounded-marketing: 12px;
+  --rounded-full: 99999px;
+
+  /* ----------------------------------------------------- shell measurements */
+  --sidebar-width: 17.5rem;
+  --toc-width: 15rem;
+  --header-height: 64px;
+  --container: 1640px;
+
+  /* -------------------------------------------------- shadcn token bindings
+     The primitives in components/ui read these names. They are pointed at the
+     light palette because every surface that uses them (dialogs, popovers,
+     search) sits on a light ground; dark-section variants are explicit. */
+  --background:            var(--canvas-light);
+  --foreground:            var(--ink);
+  --card:                  var(--canvas-light);
+  --card-foreground:       var(--ink);
+  --popover:               var(--canvas-light);
+  --popover-foreground:    var(--ink);
+  --primary:               var(--ink);
+  --primary-foreground:    var(--on-primary);
+  --secondary:             var(--canvas-paper);
+  --secondary-foreground:  var(--ink);
+  --muted:                 var(--canvas-paper);
+  --muted-foreground:      var(--graphite);
+  --accent:                var(--canvas-paper);
+  --accent-foreground:     var(--ink);
+  --destructive:           var(--error);
+  --destructive-foreground:var(--on-primary);
+  --border:                var(--hairline);
+  --border-strong:         #d4d4d4;
+  --input:                 var(--hairline);
+  --ring:                  var(--link-blue);
+  --code-bg:               var(--canvas-soft);
+  --code-border:           var(--hairline-soft);
+}
+
+@theme inline {
+  --color-brand: var(--brand);
+  --color-brand-deep: var(--brand-deep);
+  --color-canvas: var(--canvas);
+  --color-canvas-soft: var(--canvas-soft);
+  --color-canvas-light: var(--canvas-light);
+  --color-canvas-paper: var(--canvas-paper);
+  --color-hairline: var(--hairline);
+  --color-hairline-soft: var(--hairline-soft);
+  --color-surface-blue-bg: var(--surface-blue-bg);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-graphite: var(--graphite);
+  --color-slate: var(--slate);
+  --color-slate-soft: var(--slate-soft);
+  --color-mute: var(--mute);
+  --color-ash: var(--ash);
+  --color-on-primary: var(--on-primary);
+  --color-link-blue: var(--link-blue);
+  --color-link-blue-soft: var(--link-blue-soft);
+  --color-success: var(--success);
+  --color-error: var(--error);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-code-bg: var(--code-bg);
+  --color-code-border: var(--code-border);
+
+  --radius-none: var(--rounded-none);
+  --radius-sm: var(--rounded-app-sm);
+  --radius-md: var(--rounded-app-md);
+  --radius-lg: var(--rounded-app-lg);
+  --radius-xl: var(--rounded-marketing);
+  --radius-app-xs: var(--rounded-app-xs);
+  --radius-marketing: var(--rounded-marketing);
+
+  --spacing-xxs: var(--space-xxs);
+  --spacing-xs: var(--space-xs);
+  --spacing-sm: var(--space-sm);
+  --spacing-md: var(--space-md);
+  --spacing-lg: var(--space-lg);
+  --spacing-xl: var(--space-xl);
+  --spacing-xxl: var(--space-xxl);
+  --spacing-section: var(--space-section);
+  --spacing-section-lg: var(--space-section-lg);
+
+  --font-sans: var(--font-sans-brand), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-mono-brand), ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@layer base {
+  * { border-color: var(--border); }
+
+  html {
+    color-scheme: light;
+    scroll-behavior: smooth;
+    scroll-padding-top: calc(var(--header-height) + 1.5rem);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+  }
+
+  body {
+    background-color: var(--canvas);
+    color: var(--on-primary);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection { background: var(--brand); color: var(--ink); }
+
+  :focus-visible {
+    outline: 2px solid var(--link-blue);
+    outline-offset: 2px;
+  }
+}
+
+/* ======================================================== typography scale
+   One family across every level. Hierarchy is size, weight and tracking —
+   never a contrasting display family, never mixed weights inside a heading.
+
+   Tracking values are the spec's, less 0.5px at display sizes, which is the
+   documented compensation for setting this scale in Inter rather than in
+   waldenburgNormal. Display steps down at the xs and xxs breakpoints with
+   tracking relaxing proportionally, so a 64px headline is not set with a
+   112px headline's negative fit. */
+
+.t-display-mega {
+  font-size: 112px; font-weight: 400; line-height: 1.0; letter-spacing: -5.0px;
+}
+.t-display-xl {
+  font-size: 72px; font-weight: 400; line-height: 1.05; letter-spacing: -3.24px;
+}
+.t-display-lg {
+  font-size: 60px; font-weight: 400; line-height: 0.8; letter-spacing: -0.6px;
+}
+.t-display-md {
+  font-size: 48px; font-weight: 400; line-height: 1.08; letter-spacing: -1.92px;
+}
+.t-display-sm {
+  font-size: 38px; font-weight: 400; line-height: 1.10; letter-spacing: -1.3px;
+}
+.t-heading-md {
+  font-size: 32px; font-weight: 425; line-height: 1.13; letter-spacing: -0.4px;
+}
+.t-heading-sm {
+  font-size: 24px; font-weight: 400; line-height: 1.10; letter-spacing: -0.34px;
+}
+.t-subtitle {
+  font-size: 18px; font-weight: 400; line-height: 1.5; letter-spacing: -0.18px;
+}
+.t-body      { font-size: 16px; font-weight: 400; line-height: 1.5; letter-spacing: 0; }
+.t-body-sm   { font-size: 15px; font-weight: 400; line-height: 1.5; letter-spacing: -0.15px; }
+.t-caption   { font-size: 13px; font-weight: 400; line-height: 1.5; letter-spacing: 0; }
+.t-caption-tight {
+  font-size: 13px; font-weight: 500; line-height: 1.3; letter-spacing: -0.13px;
+}
+.t-meta      { font-size: 12px; font-weight: 400; line-height: 1.5; letter-spacing: -0.12px; }
+
+/* Mono roles. This is the whole of the mono system — there is no mono body. */
+.t-mono-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 13px; font-weight: 400; line-height: 1.5; letter-spacing: 0;
+}
+.t-mono-caps {
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 400; line-height: 1.5; letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.t-mono-micro {
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 400; line-height: 1.3; letter-spacing: 0.04em;
+}
+
+/* `.inscribe` was the previous system's small-caps label class and is used
+   across the docs shell. It is retained as an alias of the mono-caps role so
+   every existing label becomes an IBM Plex Mono eyebrow, which is exactly
+   where this system wants them. */
+.inscribe { font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; }
+.inscribe-tight { font-family: var(--font-mono); letter-spacing: 0.02em; }
+
+/* Display steps down universally at xs, and again at xxs, tracking relaxing
+   with it: -1.92px at 64px rather than the -5.0px a 112px setting carries. */
+@media (max-width: 1440px) {
+  .t-display-mega { font-size: 96px; letter-spacing: -4.1px; }
+}
+@media (max-width: 768px) {
+  .t-display-mega { font-size: 76px; letter-spacing: -2.7px; }
+  .t-display-xl   { font-size: 56px; letter-spacing: -2.1px; }
+  .t-display-md   { font-size: 38px; letter-spacing: -1.3px; }
+  .t-display-sm   { font-size: 30px; letter-spacing: -0.9px; }
+  .t-heading-md   { font-size: 26px; }
+}
+@media (max-width: 480px) {
+  .t-display-mega { font-size: 64px; letter-spacing: -1.92px; }
+  .t-display-xl   { font-size: 44px; letter-spacing: -1.4px; }
+  .t-display-lg   { font-size: 40px; line-height: 0.95; }
+  .t-display-md   { font-size: 32px; letter-spacing: -0.9px; }
+}
+
+/* ===================================================== section polarity
+   The system's primary depth cue. Adjacent bands cut hard from dark to light
+   with no transitional surface, gradient or rule between them. */
+
+.section-dark {
+  background: var(--canvas);
+  color: var(--on-primary);
+  padding-block: var(--space-section-lg);
+}
+.section-light {
+  background: var(--canvas-light);
+  color: var(--ink);
+  padding-block: var(--space-section-lg);
+}
+.section-paper {
+  background: var(--canvas-paper);
+  color: var(--ink);
+  padding-block: var(--space-section-lg);
+}
+@media (max-width: 768px) {
+  .section-dark, .section-light, .section-paper {
+    padding-block: var(--space-section);
+  }
+}
+
+.container-editorial {
+  /* `width: 100%` is load-bearing, not belt and braces. Inside a flex column
+     (which both pinned sections are) an auto inline margin beats `align-items:
+     stretch`, so without a declared width the container collapses to its
+     content and centres itself, pulling every heading off the page's left
+     edge. */
+  width: 100%;
+  margin-inline: auto;
+  max-width: var(--container);
+  padding-inline: var(--space-lg);
+}
+
+/* ============================================================== components */
+
+/* Marketing CTAs are pills; application chrome is cut at 3-6px. */
+.btn-pill {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 44px; padding-inline: var(--space-lg);
+  border-radius: var(--rounded-full);
+  font-size: 16px; font-weight: 500; line-height: 1.5;
+  white-space: nowrap;
+  transition: background-color .15s ease, color .15s ease, opacity .15s ease;
+}
+@media (max-width: 768px) { .btn-pill { height: 48px; } }
+
+.btn-primary {
+  background: var(--canvas-light); color: var(--ink);
+  border: 1px solid var(--ink);
+}
+.btn-primary:hover { background: var(--canvas-paper); }
+
+.btn-primary-on-light {
+  background: var(--ink); color: var(--on-primary);
+  border: 1px solid var(--ink);
+}
+.btn-primary-on-light:hover { background: var(--ink-soft); }
+
+.btn-brand { background: var(--brand); color: var(--ink); border: 1px solid var(--brand); }
+.btn-brand:hover { opacity: .88; }
+
+.btn-secondary-dark {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 36px; padding-inline: var(--space-sm);
+  background: var(--canvas-soft); color: var(--ash);
+  border: 1px solid var(--hairline-soft);
+  border-radius: var(--rounded-app-md);
+  font-size: 13px; font-weight: 500; line-height: 1.3; letter-spacing: -0.13px;
+  transition: color .15s ease, background-color .15s ease;
+}
+.btn-secondary-dark:hover { color: var(--on-primary); background: #2a2a2a; }
+@media (max-width: 768px) { .btn-secondary-dark { height: 44px; } }
+
+.btn-ghost-dark {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--ash); border-radius: var(--rounded-full);
+  font-size: 13px; font-weight: 500; line-height: 1.3; letter-spacing: -0.13px;
+  transition: color .15s ease;
+}
+.btn-ghost-dark:hover { color: var(--on-primary); }
+
+/* Cards. Padding is 32px on marketing surfaces — more generous than the 24px
+   typical of B2B systems, which is what gives them the editorial-spread feel. */
+.card-dark {
+  background: var(--canvas-soft); color: var(--on-primary);
+  padding: var(--space-xl); border-radius: var(--rounded-marketing);
+  border: 1px solid var(--hairline-soft);
+}
+.card-brand {
+  background: var(--brand); color: var(--ink);
+  padding: var(--space-xl); border-radius: var(--rounded-marketing);
+}
+.card-light {
+  background: var(--canvas-light); color: var(--ink);
+  padding: var(--space-xl); border-radius: var(--rounded-marketing);
+  border: 1px solid var(--hairline);
+}
+
+/* The brand dot. Always 12px, always 8px to the left of the wordmark. */
+.brand-dot {
+  display: inline-block; width: 12px; height: 12px;
+  background: var(--brand); border-radius: var(--rounded-full);
+  flex: none;
+}
+@media (max-width: 376px) { .brand-dot { width: 10px; height: 10px; } }
+
+/* The app-window frame. 6px corners rather than the 12px marketing radius, so
+   framed product surfaces read as real application chrome. */
+.app-window {
+  background: var(--canvas-soft);
+  border: 1px solid var(--hairline-soft);
+  border-radius: var(--rounded-app-lg);
+  overflow: hidden;
+}
+.app-window-chrome {
+  display: flex; align-items: center; gap: 6px;
+  padding: 10px var(--space-md);
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.app-window-dot { width: 10px; height: 10px; border-radius: var(--rounded-full); }
+
+.alert-banner {
+  background: var(--surface-blue-bg); color: var(--ink);
+  border-radius: var(--rounded-app-lg); padding: var(--space-md);
+  font-size: 15px; line-height: 1.5; letter-spacing: -0.15px;
+}
+
+/* ------------------------------------------------------------------- prose
+   Hand-rolled: a docs page needs a dozen elements, and a plugin's defaults
+   would have to be undone one at a time.
+
+   Documentation sits on canvas-light. It is the densest reading surface in
+   the system, and this system puts density on the light polarity. */
+
+.prose { font-size: 16px; line-height: 1.5; color: var(--ink); }
+.prose > * + * { margin-top: 1.25rem; }
+
+.prose h2, .prose h3, .prose h4 {
+  font-weight: 400;
+  color: var(--ink);
+  scroll-margin-top: calc(var(--header-height) + 1.5rem);
+}
+.prose h2 {
+  font-size: 32px; line-height: 1.13; letter-spacing: -0.4px;
+  margin-top: 3.5rem; padding-top: 1.5rem;
+  border-top: 1px solid var(--hairline);
+}
+.prose h3 { font-size: 24px; line-height: 1.10; letter-spacing: -0.34px; margin-top: 2.5rem; }
+.prose h4 { font-size: 18px; line-height: 1.4; letter-spacing: -0.18px; margin-top: 1.9rem; }
+.prose > h2:first-child, .prose > h3:first-child { margin-top: 0; }
+
+.prose .heading-anchor { color: inherit; text-decoration: none; }
+.prose .heading-anchor:hover {
+  text-decoration: underline; text-underline-offset: 6px;
+  text-decoration-color: var(--brand);
+}
+
+.prose p { color: var(--ink-soft); }
+
+/* Links are the system's blue on light surfaces — coral is reserved for CTAs
+   and never spent on inline text. */
+.prose a:not(.heading-anchor):not(.not-prose) {
+  color: var(--link-blue);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in srgb, var(--link-blue) 35%, transparent);
+  transition: text-decoration-color .15s ease;
+}
+.prose a:not(.heading-anchor):hover { text-decoration-color: var(--link-blue); }
+
+.prose ul, .prose ol { padding-left: 1.35rem; color: var(--ink-soft); }
+.prose ul { list-style: disc; }
+.prose ol { list-style: decimal; }
+.prose li { margin-top: 0.35rem; padding-left: 0.25rem; }
+.prose li::marker { color: var(--graphite); }
+.prose li > ul, .prose li > ol { margin-top: 0.35rem; }
+
+.prose strong { font-weight: 600; color: var(--ink); }
+
+.prose blockquote {
+  border-left: 2px solid var(--brand);
+  padding: 0.1rem 0 0.1rem 1.2rem;
+  color: var(--graphite);
+}
+.prose blockquote p { color: inherit; }
+
+/* Inline code sits on the LIGHT ground, so it is coloured here rather than by
+   the highlighter, whose palette is built for the dark code block. The
+   `span` override is a guard: if a future `{:ts}` annotation ever asks
+   rehype-pretty-code to highlight an inline snippet, its dark foregrounds
+   would otherwise land on this near-white chip and disappear. */
+.prose :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--canvas-paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--rounded-app-sm);
+  padding: 0.1rem 0.34rem;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.prose :not(pre) > code span { color: inherit !important; }
+.prose a :not(pre) > code { color: inherit; }
+
+/* Code is framed as application chrome, not as a marketing card: dark ground,
+   6px corners. It is the one dark object on a light documentation page, which
+   is the polarity rhythm working at component scale. */
+.prose pre {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.7;
+  background: var(--canvas-soft);
+  border: 1px solid var(--hairline-soft);
+  border-radius: var(--rounded-app-lg);
+  color: var(--ash);
+  padding: var(--space-md) 1.15rem;
+  overflow-x: auto;
+  tab-size: 2;
+}
+.prose pre code { display: grid; background: none; border: 0; padding: 0; }
+.prose pre code [data-line] { padding-inline: 0; }
+.prose pre code [data-highlighted-line] {
+  background: rgba(255,255,255,0.06);
+  box-shadow: inset 2px 0 0 var(--brand);
+}
+
+/* The comparison-table surface: hairline rules, 16px cells, no fills. */
+.prose .table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--hairline);
+  border-radius: var(--rounded-marketing);
+  background: var(--canvas-light);
+}
+.prose table { width: 100%; border-collapse: collapse; font-size: 15px; letter-spacing: -0.15px; }
+.prose th {
+  text-align: left;
+  font-family: var(--font-mono);
+  font-weight: 400;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--graphite);
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--hairline);
+  white-space: nowrap;
+}
+.prose td {
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--hairline);
+  vertical-align: top;
+  color: var(--ink-soft);
+}
+.prose tbody tr:last-child td { border-bottom: 0; }
+.prose td code { white-space: nowrap; }
+
+.prose hr { border: 0; border-top: 1px solid var(--hairline); margin-block: 2.75rem; }
+
+.thin-scroll { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.thin-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+.thin-scroll::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 99px; }
+.thin-scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* ------------------------------------------------------- scroll choreography
+   These rules are applied by GSAP at runtime, never statically, so a browser
+   that skips the animation (reduced motion, a narrow viewport, no JavaScript)
+   cannot inherit a layout that only makes sense while the animation is
+   driving it. */
+

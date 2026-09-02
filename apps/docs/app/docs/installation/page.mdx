@@ -1,0 +1,118 @@
+export const metadata = {
+  title: 'Installation',
+  description: 'Install passkify, pick the right entry point, and check runtime requirements.',
+};
+
+```bash
+npm install passkify
+```
+
+No peer dependencies, no post-install step, and nothing to configure at install
+time.
+
+## Entry points
+
+The package has two halves that never run in the same place.
+
+<PropList>
+  <Prop name="passkify" type="server (Node)">
+    The server API. Re-exports everything from `passkify/server`, because that
+    is what a bare `import ... from 'passkify'` resolves to in a Node process.
+  </Prop>
+  <Prop name="passkify/server" type="server (Node)">
+    The same module, named explicitly. Prefer this in a codebase where server
+    and client code sit side by side, since the import path then says which
+    side of the wire a file belongs to.
+  </Prop>
+  <Prop name="passkify/client" type="browser">
+    The browser half. No Node built-ins, so it bundles anywhere.
+  </Prop>
+</PropList>
+
+```js
+import { PasskeyServer, MemoryStore } from 'passkify';        // Node
+import { register, login } from 'passkify/client';            // browser
+```
+
+<Callout type="warning" title="Importing the server half into browser code fails at build time">
+That is deliberate. `passkify/server` pulls in `node:crypto`; if it could be
+imported silently you would ship a broken bundle instead of getting an error
+while you still have the file open.
+</Callout>
+
+## Requirements
+
+<PropList>
+  <Prop name="Node" type=">= 18">
+    Uses `node:crypto` for random bytes, SHA-256, and JWK public-key import.
+    JWK import is why 18 is the floor rather than 16.
+  </Prop>
+  <Prop name="Module format" type="ESM and CommonJS">
+    Both builds ship. `import` resolves to the ESM build, `require` to the
+    CommonJS one, and types come from a single set of declarations.
+  </Prop>
+  <Prop name="TypeScript" type="optional, >= 5.0">
+    Types are bundled. `moduleResolution` must be `bundler`, `node16` or
+    `nodenext` for the subpath exports to resolve.
+  </Prop>
+  <Prop name="HTTPS" type="required in production">
+    WebAuthn only runs in a secure context. `localhost` counts as one, which is
+    why local development works over plain HTTP. Everything else needs real
+    TLS.
+  </Prop>
+</PropList>
+
+### Browser support
+
+Passkeys work in every current browser. The features that are newer than the
+base API degrade rather than break.
+
+| Feature | Chrome | Safari | Firefox | Edge |
+| --- | --- | --- | --- | --- |
+| WebAuthn | 67 | 14 | 60 | 18 |
+| Passkeys (discoverable, synced) | 108 | 16 | 122 | 108 |
+| Conditional UI (autofill) | 108 | 16 | 119 | 108 |
+
+`passkify/client` feature-detects all of it. `isSupported()`,
+`isPlatformAuthenticatorAvailable()` and `isAutofillAvailable()` let you decide
+what to show; see the [client API](/docs/client).
+
+## Runtime footprint
+
+<PropList>
+  <Prop name="Runtime dependencies" type="0">
+    The only supply chain is Node's own `crypto`. CBOR decoding, COSE key
+    parsing, attestation verification and base64url are all in the package.
+  </Prop>
+  <Prop name="Browser bundle" type="~6.5 kB gzipped">
+    That is `passkify/client` plus the shared encoding and error modules. The
+    server half never reaches the browser.
+  </Prop>
+</PropList>
+
+<Reason title="Why zero dependencies is a feature here, not a slogan">
+This code sits directly on attacker-controlled bytes. Every dependency in that
+path is code you are trusting without reading and a version you have to keep
+patched. The parser is about four hundred lines; that is small enough that
+reading it is a realistic thing to ask of a security reviewer, and small enough
+that shipping it beats importing it.
+</Reason>
+
+## Verify the install
+
+```js
+import { PasskeyServer, MemoryStore } from 'passkify';
+
+const passkeys = new PasskeyServer({
+  rpName: 'Test',
+  origin: 'http://localhost:3000',
+  store: new MemoryStore(),
+});
+
+const { options } = await passkeys.startRegistration({ username: 'ada' });
+console.log(options.rp.id);          // 'localhost'
+console.log(options.challenge);      // 43 base64url characters
+```
+
+If the constructor throws, read the message. Configuration errors are checked
+eagerly and name the fix; see [configuration](/docs/server/configuration).

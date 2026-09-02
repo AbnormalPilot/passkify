@@ -1,0 +1,311 @@
+export const metadata = {
+  title: 'Security model',
+  description: 'The full verification checklist, design decisions, and what stays your job.',
+};
+
+## Why passkeys resist phishing
+
+A password is a secret the user can be tricked into typing somewhere else. A
+passkey is a private key that never leaves the device, plus a browser rule: the
+authenticator will only sign for the Relying Party ID the credential was created
+for, and the browser will only accept an `rpID` matching the page's own domain.
+
+A convincing replica at `example.com.evil.net` cannot obtain a signature for
+`example.com`. Not "the user should notice", but "the browser will not do it".
+
+That property is why `rpID` is the one setting you must get right, and why part
+of the security boundary sits outside your code.
+
+## Verification checklist
+
+Every check, in specification order. Each has a test that tampers with exactly
+that field and asserts the matching code.
+
+### Registration, WebAuthn §7.1
+
+| # | Check | Code |
+| --- | --- | --- |
+| 1 | Challenge exists, unexpired, consumed on read | `challenge_not_found` |
+| 2 | Challenge was issued for a registration | `type_mismatch` |
+| 3 | Signed challenge equals the issued one, constant time | `challenge_mismatch` |
+| 4 | `clientData.type` is `webauthn.create` | `type_mismatch` |
+| 5 | `clientData.origin` is allowed | `origin_mismatch` |
+| 6 | Not run in a cross-origin frame | `origin_mismatch` |
+| 7 | `rpIdHash` equals SHA-256 of the configured `rpID` | `rpid_mismatch` |
+| 8 | User-present flag set | `user_not_present` |
+| 9 | User-verified flag set when required | `user_not_verified` |
+| 10 | Backup-state flag not set without backup-eligible | `parse_error` |
+| 11 | Attested credential data present and well formed | `parse_error` |
+| 12 | `rawId` matches the credential ID inside the authenticator data | `malformed_response` |
+| 13 | Public key parses, algorithm was offered | `unsupported_algorithm` |
+| 14 | Attestation statement verifies, if sent | `attestation_failed` |
+| 15 | Credential ID not already registered to anyone | `credential_exists` |
+
+### Authentication, WebAuthn §7.2
+
+| # | Check | Code |
+| --- | --- | --- |
+| 1 | Challenge exists, unexpired, consumed on read | `challenge_not_found` |
+| 2 | Challenge was issued for a login | `type_mismatch` |
+| 3 | Signed challenge equals the issued one, constant time | `challenge_mismatch` |
+| 4 | `clientData.type` is `webauthn.get` | `type_mismatch` |
+| 5 | `clientData.origin` is allowed | `origin_mismatch` |
+| 6 | Not run in a cross-origin frame | `origin_mismatch` |
+| 7 | Credential is registered | `unknown_credential` |
+| 8 | Credential belongs to the scoped account | `unknown_credential` |
+| 9 | User handle matches the credential's owner | `unknown_credential` |
+| 10 | `rpIdHash` equals SHA-256 of the configured `rpID` | `rpid_mismatch` |
+| 11 | User-present flag set | `user_not_present` |
+| 12 | User-verified flag set when required | `user_not_verified` |
+| 13 | Signature verifies over authenticator data and client data hash | `bad_signature` |
+| 14 | Signature counter did not go backwards | `counter_regression` |
+
+## Design decisions
+
+<ApiMethod name="Failure throws" kind="decision">
+
+`finishRegistration` and `finishAuthentication` never return
+`{ verified: false }`.
+
+<Reason>
+A library that returns a result object invites `if (result.verified)`, and
+invites forgetting it. Forgetting it turns a failed verification into a
+successful login, silently, in code that looks fine in review. There is no such
+shape here to forget.
+</Reason>
+
+</ApiMethod>
+
+<ApiMethod name="Challenges are deleted on read" kind="decision">
+
+Whether verification then succeeds or fails.
+
+<Reason>
+One challenge, one attempt. Enforcing it in the store contract rather than in
+calling code means no path through the library can skip it. The documentation
+pushes toward atomic primitives (`DELETE ... RETURNING`, `GETDEL`,
+`findOneAndDelete`) because a read-then-delete leaves a window where two
+concurrent replays both succeed.
+</Reason>
+
+</ApiMethod>
+
+<ApiMethod name="Registration cannot take over a username" kind="decision">
+
+<Reason>
+Without this rule, anyone who knows a username could attach their own passkey to
+that account. It is the single most common way to get a passkey integration
+catastrophically wrong, so the API refuses to express it: the `username` form
+throws on an existing account, and the mounted routes prefer the session over
+the request body.
+</Reason>
+
+</ApiMethod>
+
+<ApiMethod name="Login does not reveal whether an account exists" kind="decision">
+
+<Reason>
+Answering honestly turns the login form into a free account-enumeration oracle.
+An unknown username gets a normal challenge, and the ceremony fails later like
+any other bad attempt.
+</Reason>
+
+</ApiMethod>
+
+<ApiMethod name="Constant-time comparison" kind="decision">
+
+For challenges and RP ID hashes. Length differences leak; contents do not.
+
+</ApiMethod>
+
+<ApiMethod name="Deleting the last passkey is refused" kind="decision">
+
+<Reason>
+Otherwise a user locks themselves out permanently, with one click, from a
+settings screen where the consequence is not obvious. The guard lives in the
+server method, so an app with another factor can bypass it by calling the store
+directly.
+</Reason>
+
+</ApiMethod>
+
+<ApiMethod name="A strict CBOR parser" kind="decision">
+
+It sits directly on attacker-controlled bytes, so it bounds nesting depth,
+validates every declared length against the remaining buffer before allocating,
+rejects duplicate map keys, rejects trailing bytes, and surfaces oversized
+integers as `bigint` rather than losing precision. See
+[low-level primitives](/docs/low-level#what-the-parser-refuses).
+
+</ApiMethod>
+
+<ApiMethod name="Zero runtime dependencies" kind="decision">
+
+<Reason>
+Every dependency in this path is code you trust without reading and a version
+you have to keep patched. The parser is around four hundred lines, which is
+small enough that reading it is a realistic ask of a security reviewer.
+</Reason>
+
+</ApiMethod>
+
+## Attestation
+
+Attestation answers "what kind of authenticator made this key?". It is
+optional, and for consumer passkeys usually absent by design: Apple, Google and
+1Password return `fmt: "none"` with an all-zero AAGUID, because a per-model
+identifier is a tracking vector.
+
+passkify's position:
+
+<PropList>
+  <Prop name="Verifies any statement that arrives" type="none, packed, fido-u2f, apple">
+    A statement that does not verify fails the registration, because that is a
+    real signal.
+  </Prop>
+  <Prop name="Never requires one" type="absence is not failure">
+    Registration does not fail merely because attestation was absent.
+  </Prop>
+  <Prop name="trusted is honest" type="false without roots">
+    `true` only when you supplied `attestationRootCertificates` and the
+    presented chain validated against them.
+  </Prop>
+</PropList>
+
+<Reason title="Why no FIDO Metadata Service is bundled">
+Deciding that a certificate chain belongs to a genuine YubiKey needs MDS, which
+is a live, signed, regularly rotated document. A library that embedded a stale
+copy would be claiming a guarantee it cannot keep, and the failure would be
+silent: an outdated blob rejects new authenticator models that are perfectly
+legitimate.
+
+Enterprises that genuinely need model pinning should fetch MDS themselves and
+pass the roots in. Everyone else can ignore this section.
+</Reason>
+
+Unimplemented formats (`tpm`, `android-key`, `android-safetynet`) raise
+`unsupported_feature`, and only if you requested attestation in the first place.
+
+## The signature counter
+
+Some authenticators increment a counter on every signature. A counter arriving
+lower than the stored one means the same credential has signed twice from
+different states, which is what a cloned authenticator looks like.
+
+passkify rejects it by default. Two caveats:
+
+<PropList>
+  <Prop name="Most passkeys report 0 forever" type="skipped when both are zero">
+    Synced credentials cannot maintain a coherent counter across devices, so
+    they do not try. Without this exemption every second login would fail.
+  </Prop>
+  <Prop name="It is detection, not defence" type="signal only">
+    An attacker holding the private key can report any counter they like. Treat
+    a regression as something to log and investigate.
+  </Prop>
+</PropList>
+
+Override with the
+[`onCounterRegression`](/docs/server/configuration#hooks-oncounterregression)
+hook.
+
+## What stays your job
+
+<ApiMethod name="Session management" kind="yours">
+
+A verified `finishAuthentication` means "this person proved possession of a
+registered credential, just now". Use `HttpOnly`, `Secure`, `SameSite=Lax`
+cookies, rotate the session ID on login, and set a sane lifetime.
+
+</ApiMethod>
+
+<ApiMethod name="CSRF" kind="yours">
+
+The passkey endpoints are state-changing POSTs. Same-site cookies cover most of
+it. If your app uses CSRF tokens, pass one through
+`configure({ headers })`.
+
+</ApiMethod>
+
+<ApiMethod name="Rate limiting" kind="yours">
+
+Nothing here is a password guess, but `/login/start` issues a challenge to
+anyone who asks and each one costs a store write. Limit by IP, and cap
+challenges per account.
+
+</ApiMethod>
+
+<ApiMethod name="Transport security" kind="yours">
+
+HTTPS everywhere, HSTS. WebAuthn will not run otherwise, but your API should
+not either.
+
+</ApiMethod>
+
+<ApiMethod name="Authorization" kind="yours">
+
+passkify tells you *who* signed in. What they may do is yours.
+
+</ApiMethod>
+
+<ApiMethod name="Logging" kind="yours">
+
+Log registrations, logins, credential deletions and counter regressions with
+the user ID.
+
+<Callout type="warning" title="Do not log user handles at info level">
+A user handle is a stable cross-request identifier that also lives in the
+user's password manager. Treat it like a session ID rather than like a username.
+Challenges and credential IDs likewise do not belong in routine logs.
+</Callout>
+
+</ApiMethod>
+
+## Account recovery
+
+The genuinely hard part of going passwordless, and no library can decide it for
+you. The failure mode is not subtle: a user who loses every device loses the
+account.
+
+What helps, roughly in order of how much:
+
+<Steps>
+
+<Step title="Push for a second passkey at signup">
+
+A synced passkey (`deviceType: 'multiDevice'`) already survives losing one
+device, because it lives in the user's iCloud or Google account. A second one on
+a different platform survives losing that too.
+
+This is the cheapest fix by a wide margin. Use
+`listCredentials(userId).length === 1` to drive the prompt.
+
+</Step>
+
+<Step title="Keep a recovery channel you already trust">
+
+A verified email with a short-lived, single-use link is the usual answer.
+
+</Step>
+
+<Step title="Make recovery visible">
+
+Notify every registered channel when a passkey is added or recovery is used. A
+silent enrolment is indistinguishable from a takeover.
+
+</Step>
+
+<Step title="Watch the recovery path's strength">
+
+Recovery is the weakest link by construction. An emailed magic link means your
+passwordless account is only as strong as the user's email. That may well be
+the right trade; make it deliberately, and rate-limit it.
+
+</Step>
+
+</Steps>
+
+## Reporting a vulnerability
+
+Please do not open a public issue. Report privately to the maintainers and
+allow reasonable time for a fix before disclosure.

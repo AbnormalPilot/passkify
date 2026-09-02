@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- The identification mark at tab scale.
+
+       Two constraints on editing this file, both of which fail silently by
+       leaving the tab with no icon rather than by erroring where you can see
+       it: nothing may precede the svg element, because the metadata loader
+       reads the root tag to size the image and rejects the file outright if a
+       comment comes first; and no double hyphen may appear inside this
+       comment, because it is parsed as XML. Writing a CSS custom property in
+       full here would do exactly that.
+
+       `BrandMark` pairs a coral dot with the wordmark, and its contract is
+       that the dot is never substituted for a logo glyph. At 16px the wordmark
+       is illegible, so the tile drops it and keeps the dot: the one element
+       the system says is always the mark.
+
+       6px on a 32px tile is the `rounded-app-lg` token, which is for
+       application chrome. A browser tab is chrome, not a marketing card, so
+       the tile does not take the 12px marketing radius.
+
+       The dot is 14px against the tile's 32px, which holds the generous
+       dot-to-context ratio the header uses (12px against 18px type) and still
+       renders ~7px wide when the tab paints this at 16px. -->
+  <rect width="32" height="32" rx="6" fill="#0b0b0b"/>
+  <circle cx="16" cy="16" r="7" fill="#f36458"/>
+</svg>

@@ -1,0 +1,363 @@
+export const metadata = {
+  title: 'Configuration',
+  description: 'Every option on PasskeyServerConfig, what it changes, and when to move it.',
+};
+
+```js
+const passkeys = new PasskeyServer({
+  rpName: 'Acme',
+  origin: 'https://acme.com',
+  store: myStore,
+});
+```
+
+Three required options. The rest have defaults chosen so that the common case
+needs no configuration at all.
+
+## Required
+
+<ApiMethod name="rpName" signature="rpName: string" kind="option">
+
+The site name shown in the operating system's passkey prompt.
+
+<Reason title="Keep it short">
+It appears mid-sentence in a system dialog: *"Do you want to save a passkey for
+Acme?"* A long legal entity name reads badly there and gets truncated on
+narrow phone dialogs. Use "Acme", not "Acme Corporation Customer Portal".
+</Reason>
+
+</ApiMethod>
+
+<ApiMethod name="origin" signature="origin: string | readonly OriginMatcher[]" kind="option">
+
+The origin or origins your login page is served from, scheme and port included.
+
+```js
+origin: 'https://acme.com'
+origin: ['https://acme.com', 'https://www.acme.com']
+```
+
+Every response carries the origin the browser saw, and passkify rejects any that
+is not in this list.
+
+<Reason title="Why exact strings, and why a pattern is dangerous">
+This list is the second half of the anti-phishing guarantee. The browser
+enforces the `rpID` binding; this check enforces that the ceremony ran on a page
+you actually serve.
+
+A matcher may also be a `RegExp` or a predicate, for wildcard-subdomain setups.
+Anchor it if you use one. An unanchored pattern like
+`/https:\/\/.*acme\.com/` matches `https://acme.com.evil.net`, and that
+single missing anchor hands an attacker your users' credentials.
+</Reason>
+
+<Callout type="warning" title="Behind a proxy, use the public origin">
+The browser reports the origin it loaded the page from, which is your public
+URL, not `http://localhost:8080` where your app happens to listen.
+</Callout>
+
+</ApiMethod>
+
+<ApiMethod name="store" signature="store: PasskeyStore" kind="option">
+
+Where users, credentials and challenges live. See [storage](/docs/storage).
+
+Use `new MemoryStore()` while you are trying things out; it is a complete,
+readable implementation you can use as a template for a real one.
+
+</ApiMethod>
+
+## Identity
+
+<ApiMethod name="rpID" signature="rpID?: string" defaultValue="hostname of the first string origin" kind="option">
+
+The domain your passkeys are bound to. Must be the origin's host or a parent
+domain of it.
+
+```js
+// Serving app.acme.com and www.acme.com from one account system:
+{ origin: ['https://app.acme.com', 'https://www.acme.com'], rpID: 'acme.com' }
+```
+
+<Reason title="Decide this before your first user registers">
+Credentials are permanently bound to the `rpID` they were created under.
+Changing it later does not migrate anything: every existing passkey stops
+working and every user has to enrol again.
+
+If there is any chance you will want one passkey to work across subdomains, set
+it to your apex domain now. Going from `acme.com` to `app.acme.com` later is
+impossible without a mass re-enrolment; the reverse is equally impossible.
+</Reason>
+
+</ApiMethod>
+
+## Ceremony policy
+
+<ApiMethod name="userVerification" signature="userVerification?: 'required' | 'preferred' | 'discouraged'" defaultValue="'preferred'" kind="option">
+
+Whether the authenticator must verify *who* the user is (PIN, fingerprint,
+face) rather than only that someone is present.
+
+<PropList>
+  <Prop name="'required'" type="strictest">
+    The response is rejected unless the User Verified flag is set. Makes a
+    passkey two factors in one gesture.
+  </Prop>
+  <Prop name="'preferred'" type="default">
+    Asks for verification, accepts a response without it.
+  </Prop>
+  <Prop name="'discouraged'" type="loosest">
+    Only presence. Faster, and appropriate for a second factor alongside a
+    password.
+  </Prop>
+</PropList>
+
+<Reason title="Why 'preferred' rather than 'required'">
+`'required'` is the correct choice when a passkey is your only factor, and you
+should use it there. It is not the default because it turns some older security
+keys, and some authenticators with no PIN configured, into a dead end: the
+ceremony fails and the user has no way to proceed.
+
+`'preferred'` gets verification everywhere it is available, which in practice is
+nearly everywhere, without locking anyone out. Move to `'required'` deliberately,
+once you know your users' authenticators can satisfy it.
+</Reason>
+
+</ApiMethod>
+
+<ApiMethod name="residentKey" signature="residentKey?: 'required' | 'preferred' | 'discouraged'" defaultValue="'preferred'" kind="option">
+
+Whether the credential is discoverable, meaning it can be used to sign in
+without typing a username first.
+
+<Reason>
+`'required'` guarantees usernameless login but can fail outright on
+authenticators with limited credential storage, which includes many hardware
+security keys. `'preferred'` produces a discoverable credential wherever
+possible and falls back silently where not, so `login()` works for the vast
+majority while nobody is turned away.
+</Reason>
+
+</ApiMethod>
+
+<ApiMethod name="authenticatorAttachment" signature="authenticatorAttachment?: 'platform' | 'cross-platform'" defaultValue="unset" kind="option">
+
+Restrict which kind of authenticator may be used.
+
+<PropList>
+  <Prop name="'platform'" type="built in">
+    Touch ID, Face ID, Windows Hello, Android screen lock. Bound to this device.
+  </Prop>
+  <Prop name="'cross-platform'" type="roaming">
+    USB security keys, and phones used over the hybrid transport.
+  </Prop>
+</PropList>
+
+<Reason title="Why the default is unset">
+Leaving it unset lets the browser offer everything the user has, including
+scanning a QR code to use a phone. Setting `'platform'` removes that option, so
+a visitor on a shared or work computer has no way to sign in at all. Set it only
+when you have a policy reason, not to simplify the prompt.
+</Reason>
+
+</ApiMethod>
+
+## Timing
+
+<ApiMethod name="timeout" signature="timeout?: number" defaultValue="60000" kind="option">
+
+How long the browser prompt stays open, in milliseconds. Passed to the
+authenticator as a hint.
+
+<Reason>
+Sixty seconds is enough to notice a prompt and touch a sensor. It is not enough
+to find a phone in another room, so raise it toward 120000 if your flow expects
+a cross-device hybrid scan.
+</Reason>
+
+</ApiMethod>
+
+<ApiMethod name="challengeTimeout" signature="challengeTimeout?: number" defaultValue="300000" kind="option">
+
+How long a challenge remains valid server-side, in milliseconds.
+
+<Reason title="Why it is longer than the browser timeout">
+The browser prompt and the server's patience are different clocks. A user might
+dismiss the prompt, find their security key, and click your button again; a
+tight server window would reject that second attempt with a confusing
+`challenge_not_found`.
+
+Five minutes covers realistic hesitation without leaving a useful replay
+surface, especially since the challenge is single-use regardless.
+</Reason>
+
+</ApiMethod>
+
+## Cryptography
+
+<ApiMethod name="challengeSize" signature="challengeSize?: number" defaultValue="32" kind="option">
+
+Challenge length in bytes. The specification's floor is 16, and passkify
+refuses anything smaller.
+
+<Reason>
+Sixteen bytes is already beyond guessing. Thirty-two costs nothing, matches
+SHA-256's output width, and removes any need to think about it again.
+</Reason>
+
+</ApiMethod>
+
+<ApiMethod name="supportedAlgorithms" signature="supportedAlgorithms?: readonly number[]" defaultValue="[-7, -257]" kind="option">
+
+COSE algorithm identifiers offered to authenticators, best first. The defaults
+are ES256 and RS256.
+
+```js
+import { COSEAlgorithm } from 'passkify';
+
+supportedAlgorithms: [COSEAlgorithm.ES256, COSEAlgorithm.RS256, COSEAlgorithm.EdDSA]
+```
+
+<Reason title="Why the list is deliberately short">
+ES256 covers essentially every shipping passkey provider. RS256 is there for
+older Windows Hello and TPM-backed keys. Both are mandatory-to-implement in the
+WebAuthn specification, so the pair is universal.
+
+A shorter list means fewer verification code paths that have to be right. passkify
+can verify ES384, ES512, PS256/384/512, RS384, RS512, RS1 and EdDSA, and you can
+enable any of them here, but offering algorithms nobody uses adds risk without
+adding reach.
+</Reason>
+
+</ApiMethod>
+
+## Attestation
+
+<ApiMethod name="attestation" signature="attestation?: 'none' | 'indirect' | 'direct' | 'enterprise'" defaultValue="'none'" kind="option">
+
+How much the authenticator should say about itself.
+
+<Reason title="Leave this alone">
+Requesting attestation shows an additional, more alarming consent prompt on some
+platforms, and consumer passkey providers return an anonymous statement anyway.
+You pay a conversion cost for information you do not get.
+
+Change it only if you are an enterprise pinning specific authenticator models,
+and then also set `attestationRootCertificates`. See
+[attestation](/docs/guides/security#attestation).
+</Reason>
+
+</ApiMethod>
+
+<ApiMethod name="attestationRootCertificates" signature="attestationRootCertificates?: readonly (string | Uint8Array)[]" defaultValue="[]" kind="option" advanced>
+
+PEM or DER root certificates to validate attestation chains against.
+
+<Reason>
+Without roots, `AttestationResult.trusted` is always `false`, and honestly so:
+a chain that validates against nothing proves nothing. passkify does not ship a
+FIDO Metadata Service blob, because MDS is a live, signed, rotating document and
+an embedded stale copy would be a guarantee the library cannot keep.
+</Reason>
+
+</ApiMethod>
+
+<ApiMethod name="requireBackupEligible" signature="requireBackupEligible?: boolean" defaultValue="false" kind="option">
+
+Reject credentials that cannot sync between devices.
+
+<Reason title="Why off by default">
+Turning this on locks out every hardware security key, because they are
+device-bound by design. It makes sense only if your recovery story depends on
+credentials surviving a lost phone, and you would rather refuse enrolment than
+support a user with one device-bound passkey.
+
+A softer approach: leave it off, record `deviceType` (passkify always does), and
+prompt users whose only passkey is `singleDevice` to add a second one.
+</Reason>
+
+</ApiMethod>
+
+## Hooks
+
+<ApiMethod name="hooks" signature="hooks?: PasskeyHooks" defaultValue="{}" kind="option">
+
+Callbacks fired after a successful ceremony. Throwing from a hook fails the
+ceremony.
+
+<ApiMethod name="hooks.onRegistered" signature="(event: { user, credential, isNewUser }) => void | Promise<void>" kind="hook">
+
+A credential was verified and stored. Good place for a welcome email or an
+audit record.
+
+</ApiMethod>
+
+<ApiMethod name="hooks.onAuthenticated" signature="(event: { user, credential }) => void | Promise<void>" kind="hook">
+
+A login succeeded.
+
+<Callout type="note" title="This hook cannot set a cookie">
+It receives no request or response object. Session establishment belongs in the
+[HTTP adapter's](/docs/server/adapters) `onLogin`, which does. Use this hook for
+side effects that are not request-scoped.
+</Callout>
+
+</ApiMethod>
+
+<ApiMethod name="hooks.onCounterRegression" signature="(event: { user, credential, storedCounter, presentedCounter }) => boolean | Promise<boolean>" kind="hook">
+
+A credential's signature counter went backwards, which can mean the
+authenticator has been cloned. Return `true` to allow the login anyway.
+
+```js
+onCounterRegression: ({ user, storedCounter, presentedCounter }) => {
+  logger.warn('possible cloned authenticator', {
+    userId: user.id, storedCounter, presentedCounter,
+  });
+  return false;   // reject, the default
+},
+```
+
+<Reason title="Why this is a hook rather than a boolean setting">
+Counter regression is a signal, not a verdict. It genuinely does indicate
+cloning; it also fires for buggy authenticator firmware and for credentials
+restored from a backup. Which of those you are looking at depends on your user
+base, and the right response is usually to log and alert rather than silently
+allow or silently deny.
+
+A boolean could only express "reject" or "ignore". A hook lets you record the
+event, notify the user, and then decide.
+</Reason>
+
+</ApiMethod>
+
+</ApiMethod>
+
+## Full example
+
+```js
+import { PasskeyServer, COSEAlgorithm } from 'passkify';
+import { store } from './store.js';
+
+export const passkeys = new PasskeyServer({
+  rpName: 'Acme',
+  origin: ['https://acme.com', 'https://www.acme.com'],
+  rpID: 'acme.com',
+  store,
+
+  userVerification: 'required',
+  residentKey: 'preferred',
+  timeout: 120_000,
+  challengeTimeout: 300_000,
+  supportedAlgorithms: [COSEAlgorithm.ES256, COSEAlgorithm.RS256],
+
+  hooks: {
+    onRegistered: ({ user, isNewUser }) => audit('passkey.registered', user.id, { isNewUser }),
+    onAuthenticated: ({ user }) => audit('passkey.login', user.id),
+    onCounterRegression: ({ user }) => {
+      audit('passkey.counter_regression', user.id);
+      return false;
+    },
+  },
+});
+```

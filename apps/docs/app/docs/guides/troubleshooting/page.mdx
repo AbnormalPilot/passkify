@@ -1,0 +1,192 @@
+export const metadata = {
+  title: 'Troubleshooting',
+  description: 'NotAllowedError, origin_mismatch, challenge_not_found, and testing on a phone.',
+};
+
+Symptoms, causes, fixes. Ordered roughly by how often each comes up.
+
+## The prompt never appears, and you get cancelled immediately
+
+Almost always `rpID`. It must be the page's host or a parent domain of it.
+
+| Page served from | Valid `rpID` | Invalid |
+| --- | --- | --- |
+| `https://example.com` | `example.com` | `app.example.com`, `www.example.com` |
+| `https://app.example.com` | `app.example.com`, `example.com` | `other.example.com` |
+| `http://localhost:3000` | `localhost` | `127.0.0.1` |
+
+passkify checks this against your `origin` at construction, so if the server
+started, the configured `rpID` is consistent with the configured `origin`.
+**Check that the configured origin is where the page is really served from.**
+
+```js
+console.log(passkeys.rpID);      // what the server thinks
+console.log(location.origin);    // what the browser sees
+```
+
+<Callout type="note" title="127.0.0.1 is not localhost">
+They are different origins and different `rpID` values, and a passkey created
+under one will not work under the other. Pick one and use it everywhere.
+</Callout>
+
+## origin_mismatch on finish
+
+The `origin` list must contain the exact string the browser reports, scheme and
+port included. All of these are different origins:
+
+```
+https://example.com
+https://www.example.com
+http://localhost:3000
+http://localhost
+```
+
+The error message names the origin that was rejected. Compare it character for
+character against your config.
+
+<Callout type="warning" title="Behind a proxy or load balancer">
+The browser reports the **public** origin it loaded the page from, not the
+internal `http://localhost:8080` your app binds to. Configure the public one.
+</Callout>
+
+## challenge_not_found, intermittently, only in production
+
+`MemoryStore` behind more than one worker. Worker A issued the challenge, worker
+B received the response and cannot see it.
+
+This is the answer essentially every time the failure is intermittent in
+production and absent locally, because locally you run one process.
+
+**Fix:** move challenges to shared storage. Redis with `GETDEL` is a good fit;
+see [store adapters](/docs/storage/adapters#redis-for-challenges-only).
+
+Other causes, in order:
+
+- The response was replayed. Working as intended.
+- The user took longer than `challengeTimeout`, which defaults to five minutes.
+  Raise it if your flow involves finding a phone and scanning a QR code.
+
+## already_registered when adding a second passkey
+
+Expected. `excludeCredentials` told the authenticator it already holds a
+credential for this account, and it declined to make a duplicate.
+
+Show "this device already has a passkey for your account" rather than an error.
+It means the mechanism worked.
+
+## login() shows no passkeys, though one is registered
+
+Two causes:
+
+<PropList>
+  <Prop name="The credential is not discoverable" type="most likely">
+    Registered under `residentKey: 'discouraged'`, or on an authenticator with
+    no room. It can still be used with `login({ username })`, which supplies
+    `allowCredentials`.
+  </Prop>
+  <Prop name="rpID changed since registration" type="unrecoverable">
+    Credentials are permanently bound to the `rpID` they were created under.
+    Changing it orphans every one of them, and there is no migration. Users
+    must re-enrol.
+  </Prop>
+</PropList>
+
+## The second ceremony on a page fails
+
+Browsers allow exactly one outstanding WebAuthn request, and a
+`signInWithAutofill()` left running counts.
+
+passkify aborts the pending one automatically when you call `register()` or
+`login()`. If you call `navigator.credentials` directly elsewhere, call
+`cancelPendingCeremony()` first.
+
+In React, abort on unmount:
+
+```jsx
+useEffect(() => {
+  const controller = new AbortController();
+  signInWithAutofill({ signal: controller.signal }).catch(() => {});
+  return () => controller.abort();
+}, []);
+```
+
+## The autofill dropdown never offers passkeys
+
+Check all three:
+
+1. The input has `autocomplete="username webauthn"`. Both tokens, in that
+   order.
+2. `await isAutofillAvailable()` returns `true`.
+3. `signInWithAutofill()` was actually called, and its promise is not being
+   awaited somewhere that blocks.
+
+## Testing on a phone
+
+Phones need real HTTPS; `localhost` will not do. Use a tunnel:
+
+```bash
+cloudflared tunnel --url http://localhost:3000
+# or
+ngrok http 3000
+```
+
+Then set `origin` and `rpID` to the tunnel's hostname and restart.
+
+<Callout type="warning" title="Tunnel passkeys will not work on production">
+A passkey created against `abc-123.trycloudflare.com` is bound to that domain
+and is useless on `acme.com`. That is the anti-phishing binding doing its job,
+not a bug. Expect to re-enrol when you move.
+</Callout>
+
+## unsupported thrown on the server
+
+You imported `passkify/client` into server-rendered code, or `passkify` into
+browser code.
+
+- `passkify` and `passkify/server` are Node only, and pull in `node:crypto`.
+- `passkify/client` is browser only, and touches `navigator.credentials`.
+
+In Next.js, ceremonies belong in a `'use client'` component or an event
+handler.
+
+## Types do not resolve
+
+Set `moduleResolution` to `bundler`, `node16` or `nodenext`. The classic `node`
+resolution mode predates subpath exports and cannot see
+`passkify/client`.
+
+```json
+{ "compilerOptions": { "moduleResolution": "bundler" } }
+```
+
+## bad_signature on every login
+
+If it is happening for *every* credential rather than one, suspect the stored
+public key rather than the ceremony.
+
+```js
+import { parseCOSEPublicKey, fromBase64Url, algorithmName } from 'passkify';
+
+const credential = await store.getCredentialById(id);
+const key = parseCOSEPublicKey(fromBase64Url(credential.publicKey));
+console.log(algorithmName(key.alg));   // should print, not throw
+```
+
+If that throws, `publicKey` is not round-tripping through your database. The
+usual cause is a column typed as something that mangles the string, or a driver
+returning a `Buffer` where a string is expected.
+
+## Still stuck
+
+Log these four and compare them against each other:
+
+```js
+console.log({
+  configuredRpID:  passkeys.rpID,
+  configuredOrigin: process.env.ORIGIN,
+  browserOrigin:   location.origin,     // from the browser
+  errorCode:       error.code,
+});
+```
+
+Nearly every remaining case is a disagreement between the first three.

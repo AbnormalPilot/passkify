@@ -1,0 +1,186 @@
+export const metadata = {
+  title: 'FAQ',
+  description: 'Short answers to the questions that come up before and during adoption.',
+};
+
+## Adoption
+
+<ApiMethod name="Do I have to remove passwords?" kind="question">
+
+No, and you probably should not, at least not at first. Passkeys work perfectly
+well alongside a password form, and running both is how most sites roll them
+out. See [adding to an existing app](/docs/guides/existing-app) for the staged
+path.
+
+</ApiMethod>
+
+<ApiMethod name="What happens if a user loses every device?" kind="question">
+
+They lose the account, unless you gave them a recovery path. This is the hardest
+part of going passwordless and no library can solve it for you.
+
+The cheapest mitigation by a wide margin is prompting for a second passkey at
+signup, on a different device. See
+[account recovery](/docs/guides/security#account-recovery).
+
+</ApiMethod>
+
+<ApiMethod name="Will this work for users who have never heard of passkeys?" kind="question">
+
+The prompt is the operating system's own, and it says "Touch ID" or "Windows
+Hello" rather than anything about cryptography. Most users experience it as
+"sign in with my fingerprint".
+
+The part that confuses people is the *first* time, when the OS asks whether to
+save a passkey. A one-line explanation next to your button helps more than any
+amount of in-prompt wording you cannot control.
+
+</ApiMethod>
+
+<ApiMethod name="Is passkify production ready?" kind="question">
+
+It implements every check in WebAuthn §7.1 and §7.2, and the test suite drives
+a virtual authenticator that assembles authenticator data byte by byte and signs
+with real keys, so each check is exercised against a tampered response rather
+than just the happy path.
+
+It has not had an external security audit. If that matters for your risk
+profile, read
+[the security model](/docs/guides/security), read the source, and decide.
+
+</ApiMethod>
+
+## Comparisons
+
+<ApiMethod name="How is this different from a hosted auth provider?" kind="question">
+
+A hosted provider (Clerk, Auth0, WorkOS and similar) runs the identity system
+for you: sessions, recovery, admin UI, compliance. passkify is a library that
+verifies WebAuthn ceremonies against your own database, and nothing else.
+
+If you want somebody else to own identity, use a provider. If you already have
+users, sessions and a login page, and you want passkeys added to them, that is
+what this is for.
+
+</ApiMethod>
+
+<ApiMethod name="Why not use a WebAuthn library that already exists?" kind="question">
+
+Existing libraries are good. The differences here are deliberate rather than
+competitive:
+
+- **Client and server in one package**, so the encoding on both sides is written
+  by the same code and cannot disagree.
+- **Zero runtime dependencies.** The parser sits on attacker-controlled bytes,
+  and every dependency in that path is code you trust without reading.
+- **Failure throws.** There is no `verified: false` to accidentally treat as
+  success.
+- **An API that refuses to express the account-takeover bug.** Registration
+  cannot be pointed at an existing account from a request body.
+
+</ApiMethod>
+
+## Behaviour
+
+<ApiMethod name="Why does login() not tell me the username does not exist?" kind="question">
+
+Because that would make your login form an account-enumeration oracle: anyone
+could learn which usernames are registered by watching for a 404.
+
+An unknown username gets a normal, well-formed challenge, and the ceremony fails
+at verification like any other bad attempt. See
+[authentication](/docs/server/authentication).
+
+</ApiMethod>
+
+<ApiMethod name="Can one passkey work across my subdomains?" kind="question">
+
+Yes, if `rpID` is set to the shared parent domain **before the first user
+registers**. `rpID: 'acme.com'` covers `app.acme.com` and `www.acme.com`.
+
+You cannot change it afterwards. Credentials are permanently bound to the
+`rpID` they were created under, and changing it orphans every one of them.
+
+</ApiMethod>
+
+<ApiMethod name="Can one account have several passkeys?" kind="question">
+
+Yes, and it should. Each device registers its own. `excludeCredentials` stops
+the same authenticator registering twice, and
+[`listCredentials`](/docs/server/credentials) gives you the settings page.
+
+</ApiMethod>
+
+<ApiMethod name="Does passkify support 2FA, where a passkey is the second factor?" kind="question">
+
+Yes. Run a normal authentication ceremony after your password check, scoped to
+the account you just verified:
+
+```js
+const { options } = await passkeys.startAuthentication({
+  userId: userFromPasswordCheck.passkeyHandle,
+  userVerification: 'discouraged',   // presence only; the password was factor one
+});
+```
+
+</ApiMethod>
+
+<ApiMethod name="What about hardware security keys?" kind="question">
+
+They work. They register as `deviceType: 'singleDevice'` because they cannot
+sync, which matters only for your recovery planning.
+
+Do not set
+[`requireBackupEligible`](/docs/server/configuration#requirebackupeligible)
+unless you intend to turn those users away.
+
+</ApiMethod>
+
+## Operations
+
+<ApiMethod name="Do I need Redis?" kind="question">
+
+No. Any store that can do an atomic fetch-and-delete works, including a plain
+SQL table with `DELETE ... RETURNING`.
+
+Redis is a good fit for challenges specifically, because they are short-lived,
+high-churn, and `GETDEL` gives the strongest replay guarantee in one round trip.
+See [store adapters](/docs/storage/adapters#redis-for-challenges-only).
+
+</ApiMethod>
+
+<ApiMethod name="Can I run this on an edge runtime?" kind="question">
+
+The browser half, yes. The server half needs `node:crypto`, so it needs a Node
+runtime. Cloudflare Workers can do it with `nodejs_compat` enabled; test that on
+your target before committing.
+
+</ApiMethod>
+
+<ApiMethod name="How do I migrate credentials from another library?" kind="question">
+
+You need the raw COSE public key bytes per credential, plus the credential ID,
+algorithm, counter and the user handle already on the device. `rpID` must be
+identical.
+
+If your previous library stored PEM or DER instead of COSE, the conversion is
+not reversible and users have to re-enrol. Check that before planning the
+migration. See
+[migrating](/docs/guides/existing-app#migrating-from-another-webauthn-library).
+
+</ApiMethod>
+
+<ApiMethod name="How much does this add to my bundle?" kind="question">
+
+About 6.5 kB gzipped for `passkify/client`. The server half never reaches the
+browser, and importing it from browser code fails at build time rather than
+shipping something broken.
+
+</ApiMethod>
+
+## Still stuck
+
+[Troubleshooting](/docs/guides/troubleshooting) covers the specific failures,
+symptom by symptom. Nearly every remaining case is a disagreement between the
+configured `rpID`, the configured `origin`, and the origin the browser actually
+reports.

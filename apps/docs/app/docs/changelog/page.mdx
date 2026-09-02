@@ -1,0 +1,85 @@
+export const metadata = {
+  title: 'Changelog',
+  description: 'Release history, and the compatibility promise for each part of the API.',
+};
+
+## What counts as a breaking change
+
+Knowing what is covered matters more than the version numbers, so it comes
+first.
+
+<PropList>
+  <Prop name="Error codes" type="stable">
+    A `PasskeyErrorCode` is never renamed or removed in a minor release. New
+    codes may be added, so treat an unrecognised code as a generic failure
+    rather than an impossible state.
+  </Prop>
+  <Prop name="PasskeyStore" type="stable">
+    Method signatures do not change in a minor release. A new method would be a
+    major, because every existing implementation would break.
+  </Prop>
+  <Prop name="Stored record shapes" type="stable">
+    `PasskeyCredential` and `PasskeyUser` fields are not removed or retyped in a
+    minor release. Your database schema is safe across minors.
+  </Prop>
+  <Prop name="Wire types" type="stable">
+    The JSON that travels between `passkify/client` and the server. Mixed
+    versions across a deploy must keep working.
+  </Prop>
+  <Prop name="Error messages" type="not stable">
+    Written for developers and reworded as the documentation improves. Branch
+    on `code`, never on message text.
+  </Prop>
+  <Prop name="Low-level exports" type="not stable">
+    `parseAuthenticatorData`, `decodeCBOR` and the rest may change shape in a
+    minor. They are for tooling; the ceremony methods are the API.
+  </Prop>
+</PropList>
+
+<Callout type="warning" title="rpID is outside versioning entirely">
+Changing `rpID` in your own configuration orphans every credential your users
+have registered, in any version. It is the one setting with no migration path.
+See [how passkeys work](/docs/how-passkeys-work#relying-party-id).
+</Callout>
+
+## Releases
+
+<ApiMethod name="0.1.0" kind="release">
+
+Initial release.
+
+**Server**
+
+- `PasskeyServer` with `startRegistration`, `finishRegistration`,
+  `startAuthentication` and `finishAuthentication`.
+- Credential management: `listCredentials`, `renameCredential`,
+  `deleteCredential`.
+- Full WebAuthn §7.1 and §7.2 verification, 29 checks across the two
+  ceremonies.
+- Hand-written CBOR decoder, COSE key parsing, and signature verification for
+  ES256/384/512, RS256/384/512, RS1, PS256/384/512 and EdDSA.
+- Attestation verification for `none`, `packed`, `fido-u2f` and `apple`.
+- `MemoryStore`, and the `PasskeyStore` interface.
+- Express middleware and a standards `Request` handler.
+- Eager configuration validation for `rpID` and `origin`.
+
+**Browser**
+
+- `register`, `login`, `signInWithAutofill`.
+- `isSupported`, `isPlatformAuthenticatorAvailable`, `isAutofillAvailable`.
+- `createCredential` and `getAssertion` for use against your own endpoints.
+- Automatic cancellation of a superseded ceremony.
+
+**Both**
+
+- `PasskeyError` with stable codes on either side of the wire, including
+  `last_credential` (409) when removing an account's only passkey is refused.
+- Zero runtime dependencies. ESM and CommonJS builds.
+- 92 tests, most of them tampered responses driven by a virtual authenticator.
+
+</ApiMethod>
+
+## Upgrading
+
+There is nothing to upgrade from yet. When there is, this section will carry the
+migration steps for each major, and the [FAQ](/docs/faq) will point here.

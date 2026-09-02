@@ -1,0 +1,246 @@
+export const metadata = {
+  title: 'Frameworks',
+  description: 'Express, Next.js, Hono, SvelteKit, Remix, Bun, Deno and Cloudflare Workers.',
+};
+
+Two adapter shapes cover everything: Node-stream middleware, and a fetch
+handler. Pick the one your framework speaks.
+
+<Callout type="warning" title="The server half needs the Node runtime">
+It uses `node:crypto` and will not run on an edge runtime. The browser half has
+no such constraint and runs anywhere.
+</Callout>
+
+## Express, Connect, Fastify
+
+```js
+import express from 'express';
+import { PasskeyServer } from 'passkify';
+
+const app = express();
+app.use(express.json());
+
+app.use(passkeys.express({
+  basePath: '/passkey',
+  getSessionUserId: (req) => req.session.userId ?? null,
+  onLogin:    (req, res, { user }) => { req.session.userId = user.id; },
+  onRegister: (req, res, { user }) => { req.session.userId = user.id; },
+}));
+```
+
+The middleware calls `next()` for anything that is not a passkey route, so it
+is safe at the top of the stack.
+
+<Callout type="tip" title="It works without a body parser">
+If `req.body` is not already set, the adapter reads and parses the stream
+itself, capped at 512 kB. That means the same middleware works on a bare
+`node:http` server.
+</Callout>
+
+For Fastify, use `@fastify/middie` or `fastify-express` to mount Connect-style
+middleware, or call the four methods directly from a Fastify route.
+
+## Next.js App Router
+
+<Steps>
+
+<Step title="Create the shared instance">
+
+```ts
+// lib/passkeys.ts
+import { PasskeyServer } from 'passkify';
+import { store } from './store';
+
+const globalForPasskeys = globalThis as unknown as { passkeys?: PasskeyServer };
+
+export const passkeys =
+  globalForPasskeys.passkeys ??
+  new PasskeyServer({
+    rpName: 'Acme',
+    origin: process.env.NEXT_PUBLIC_ORIGIN!,
+    store,
+  });
+
+if (process.env.NODE_ENV !== 'production') {
+  globalForPasskeys.passkeys = passkeys;
+}
+```
+
+The `globalThis` stash matters in development: Next re-evaluates modules on
+every edit, and a fresh `MemoryStore` per edit discards every in-flight
+challenge.
+
+</Step>
+
+<Step title="Mount the catch-all route">
+
+```ts
+// app/api/passkey/[...passkey]/route.ts
+import { cookies } from 'next/headers';
+import { passkeys } from '@/lib/passkeys';
+
+const handler = passkeys.handler({
+  basePath: '/api/passkey',
+  getSessionUserId: async () => (await cookies()).get('session')?.value ?? null,
+  onLogin: async (_request, { user }) => {
+    (await cookies()).set('session', user.id, {
+      httpOnly: true, secure: true, sameSite: 'lax', path: '/',
+    });
+  },
+});
+
+export { handler as GET, handler as POST, handler as PATCH, handler as DELETE };
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+```
+
+</Step>
+
+<Step title="Point the client at it">
+
+```tsx
+'use client';
+import { configure, login } from 'passkify/client';
+
+configure({ baseUrl: '/api/passkey' });   // must match basePath
+```
+
+</Step>
+
+</Steps>
+
+### The three things that trip people up
+
+<PropList>
+  <Prop name="basePath must match the file path" type="404 otherwise">
+    `app/api/passkey/[...passkey]` serves `/api/passkey/*`, so the handler needs
+    `basePath: '/api/passkey'` and the client needs the same `baseUrl`. A
+    mismatch returns a 404 whose body says exactly this.
+  </Prop>
+  <Prop name="Ceremonies must run client-side" type="build error otherwise">
+    `register()` and `login()` touch `navigator.credentials`. They belong in a
+    `'use client'` component or an event handler.
+  </Prop>
+  <Prop name="runtime must be nodejs" type="not edge">
+    The server half uses `node:crypto`.
+  </Prop>
+</PropList>
+
+<Callout type="danger" title="MemoryStore does not work on serverless">
+A challenge issued by one instance is invisible to the next, so logins fail
+intermittently and confusingly. Postgres for users and credentials, Redis for
+challenges, is a good split. See [store adapters](/docs/storage/adapters).
+</Callout>
+
+## Hono
+
+```ts
+import { Hono } from 'hono';
+import { getCookie, setCookie } from 'hono/cookie';
+
+const app = new Hono();
+
+const handler = passkeys.handler({
+  basePath: '/passkey',
+  getSessionUserId: (request) => readSessionFrom(request),
+});
+
+app.all('/passkey/*', (c) => handler(c.req.raw));
+```
+
+To set a cookie, return a `HeadersInit` from `onLogin`:
+
+```ts
+onLogin: (_request, { user }) => ({
+  'set-cookie': `session=${user.id}; HttpOnly; Secure; Path=/; SameSite=Lax`,
+}),
+```
+
+## SvelteKit
+
+```ts
+// src/routes/passkey/[...path]/+server.ts
+import { passkeys } from '$lib/server/passkeys';
+
+const handler = passkeys.handler({ basePath: '/passkey' });
+
+export const GET = ({ request }) => handler(request);
+export const POST = ({ request }) => handler(request);
+export const PATCH = ({ request }) => handler(request);
+export const DELETE = ({ request }) => handler(request);
+```
+
+Import from `$lib/server/` so SvelteKit's module boundary keeps the server half
+out of the client bundle for you.
+
+## Remix and React Router
+
+```ts
+// app/routes/passkey.$.tsx
+const handler = passkeys.handler({ basePath: '/passkey' });
+
+export const loader = ({ request }) => handler(request);
+export const action = ({ request }) => handler(request);
+```
+
+## Bun
+
+```ts
+const handler = passkeys.handler({ basePath: '/passkey' });
+
+Bun.serve({
+  port: 3000,
+  fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname.startsWith('/passkey')) return handler(request);
+    return new Response('Not found', { status: 404 });
+  },
+});
+```
+
+## Deno
+
+```ts
+import { PasskeyServer } from 'npm:passkify';
+
+const handler = passkeys.handler({ basePath: '/passkey' });
+Deno.serve((request) => handler(request));
+```
+
+## Cloudflare Workers
+
+<Callout type="warning" title="Requires the Node compatibility flag">
+`node:crypto` is available in Workers only with `nodejs_compat` enabled.
+
+```toml
+# wrangler.toml
+compatibility_flags = ["nodejs_compat"]
+compatibility_date = "2024-09-23"
+```
+
+Test this on your target runtime before committing to it. If the flag is not
+available to you, run the passkify server half somewhere with a real Node
+runtime and keep the Worker in front of it.
+</Callout>
+
+## No framework at all
+
+The adapters are convenience. The four methods are the API.
+
+```js
+import { createServer } from 'node:http';
+
+createServer(async (req, res) => {
+  if (req.url === '/passkey/login/start' && req.method === 'POST') {
+    const { options } = await passkeys.startAuthentication();
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify(options));
+    return;
+  }
+  // ...
+}).listen(3000);
+```
+
+Or mount `passkeys.express()` on the bare `node:http` server, which works
+because the adapter parses its own body.

@@ -1,0 +1,232 @@
+export const metadata = {
+  title: 'Adding to an existing app',
+  description: 'Staged rollout alongside passwords, without opening an account-takeover hole.',
+};
+
+You almost certainly should not replace passwords on day one. Here is the
+staged path, and the one mistake that turns a passkey rollout into an
+account-takeover vulnerability.
+
+<Callout type="danger" title="The mistake, first">
+**Never let an unauthenticated request choose which existing account a new
+passkey attaches to.**
+
+If a request body can name an account, then anyone who knows a username owns
+that account: they register their own passkey against it and sign in as its
+owner. No password needed, no email needed.
+
+passkify makes this hard to express. `startRegistration({ username })` refuses
+existing accounts outright, adding to an account requires
+`startRegistration({ userId })`, and the mounted routes ignore a username in
+the body whenever a session is present. But if you write your own routes, this
+is on you.
+</Callout>
+
+## Stage 1: offer passkeys as an addition
+
+Let signed-in users register one from account settings. Your session already
+identifies them, so nothing about your existing auth changes.
+
+<Steps>
+
+<Step title="Add a passkey handle to your users table">
+
+```sql
+ALTER TABLE users ADD COLUMN passkey_handle TEXT UNIQUE;
+CREATE INDEX users_passkey_handle ON users (passkey_handle);
+```
+
+<Reason title="Why a separate column rather than reusing your primary key">
+Your primary key is often an auto-increment integer, which is enumerable and
+leaks your user count to anyone who reads their own handle. Handles are visible
+in the user's password manager, so that is a real disclosure.
+
+The handle also has to stay fixed forever. A separate column survives re-keying
+your users table, changing ORMs, or merging accounts.
+</Reason>
+
+</Step>
+
+<Step title="Map your users onto PasskeyUser">
+
+```js
+export const store = {
+  ...credentialAndChallengeMethods,
+
+  async getUserById(handle) {
+    const row = await db.user.findByPasskeyHandle(handle);
+    return row && { id: row.passkeyHandle, username: row.email, displayName: row.name };
+  },
+
+  async getUserByUsername(email) {
+    const row = await db.user.findByEmail(email);
+    return row?.passkeyHandle
+      ? { id: row.passkeyHandle, username: row.email, displayName: row.name }
+      : null;
+  },
+
+  async createUser() {
+    // Nobody signs up passkey-first yet.
+    throw new Error('passkey-first signup is not enabled');
+  },
+};
+```
+
+<Callout type="note" title="getUserByUsername returns null until a handle exists">
+Until a user has registered their first passkey they have no handle, so return
+`null`. That keeps `startAuthentication({ username })` from scoping a ceremony
+to an account that cannot satisfy it.
+</Callout>
+
+</Step>
+
+<Step title="Add the registration route, behind your existing auth">
+
+```js
+app.post('/settings/passkeys/start', requireAuth, async (req, res) => {
+  let handle = req.user.passkeyHandle;
+
+  // Mint one on first use.
+  if (!handle) {
+    handle = crypto.randomUUID();
+    await db.user.setPasskeyHandle(req.user.id, handle);
+  }
+
+  const { options } = await passkeys.startRegistration({ userId: handle });
+  res.json(options);
+});
+
+app.post('/settings/passkeys/finish', requireAuth, async (req, res) => {
+  await passkeys.finishRegistration(req.body);
+  res.json({ ok: true });
+});
+```
+
+The account comes from `req.user`, never from the body.
+
+</Step>
+
+<Step title="Add the button">
+
+```js
+import { register, configure } from 'passkify/client';
+
+configure({ baseUrl: '/settings/passkeys' });
+await register();   // no username: adds to the signed-in account
+```
+
+</Step>
+
+</Steps>
+
+At this point nobody can sign in with a passkey yet. That is fine. You are
+building enrolment first so that stage 2 has users to serve.
+
+## Stage 2: offer passkeys as a login option
+
+<Steps>
+
+<Step title="Add the login routes">
+
+```js
+app.post('/auth/passkey/start', async (req, res) => {
+  const { options } = await passkeys.startAuthentication();   // usernameless
+  res.json(options);
+});
+
+app.post('/auth/passkey/finish', async (req, res) => {
+  const { user } = await passkeys.finishAuthentication(req.body);
+
+  // `user.id` is the passkey handle. Resolve it to your own user.
+  const account = await db.user.findByPasskeyHandle(user.id);
+
+  // Reuse whatever login(email, password) already calls.
+  await establishSession(req, account);
+  res.json({ ok: true });
+});
+```
+
+<Reason title="Reuse your existing session code, do not write new session code">
+Whatever `login(email, password)` does at the end (regenerate the session ID,
+set the cookie, write the audit log, fire the "new sign-in" email) has been
+tested and reviewed. A parallel implementation for passkeys will drift, and the
+half that drifts is usually the security-relevant half.
+
+Call the same function. passkify's job ends at "this is who it is".
+</Reason>
+
+</Step>
+
+<Step title="Put it next to the password form, not instead of it">
+
+```html
+<input name="email" autocomplete="username webauthn">
+<input name="password" type="password" autocomplete="current-password">
+<button type="submit">Sign in</button>
+
+<button type="button" id="passkey">Sign in with a passkey</button>
+```
+
+```js
+import { login, signInWithAutofill } from 'passkify/client';
+
+passkey.onclick = async () => { await login(); location.href = '/'; };
+
+// The autocomplete token above also lets passkeys appear in the browser's
+// own dropdown, above the saved passwords.
+signInWithAutofill().then((r) => { if (r) location.href = '/'; }).catch(() => {});
+```
+
+</Step>
+
+</Steps>
+
+## Stage 3: consider dropping passwords
+
+Only once enough of your users have enrolled, and only with a recovery path
+that does not depend on a password.
+
+<PropList>
+  <Prop name="Measure enrolment first" type="before anything">
+    What fraction of monthly active users have at least one passkey? What
+    fraction have two on different devices? The second number is the one that
+    tells you whether removing passwords will generate support tickets.
+  </Prop>
+  <Prop name="Keep a recovery channel" type="required">
+    A verified email with a short-lived single-use link is the usual answer.
+    Understand that this makes the account only as strong as the user's email.
+  </Prop>
+  <Prop name="Do not delete password hashes immediately" type="reversible">
+    Disable password login, keep the hashes for a release or two. If enrolment
+    turns out to be lower than you measured, you want the rollback.
+  </Prop>
+</PropList>
+
+See [account recovery](/docs/guides/security#account-recovery) for the full
+discussion.
+
+## Migrating from another WebAuthn library
+
+Credentials are portable if you have the right fields. You need, per credential:
+
+| passkify field | What it is |
+| --- | --- |
+| `id` | base64url credential ID |
+| `publicKey` | base64url of the **raw COSE key bytes** |
+| `algorithm` | COSE identifier, `-7` for ES256 |
+| `counter` | last known signature counter |
+| `userId` | must equal the user handle already on the device |
+
+<Callout type="warning" title="The public key format is the usual blocker">
+passkify stores the raw COSE key exactly as the authenticator produced it. If
+your previous library stored PEM or DER instead, you cannot convert back: COSE
+carries the algorithm identifier, and DER does not tell you whether a P-256 key
+was registered as ES256.
+
+If you have the original `attestationObject` archived, re-derive from that.
+Otherwise the credentials cannot be migrated and users must re-enrol. Check
+this before planning the migration, not during it.
+</Callout>
+
+`rpID` must also be identical to what the credentials were created under.
+Changing it orphans every one of them.

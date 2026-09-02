@@ -1,0 +1,300 @@
+export const metadata = {
+  title: 'PasskeyStore',
+  description: 'The ten-method persistence contract and the three rules that matter.',
+};
+
+passkify never touches your database. You implement `PasskeyStore` against
+whatever you already run, and the library calls it.
+
+```js
+const passkeys = new PasskeyServer({ rpName, origin, store });
+```
+
+Ten methods. None of them need transactions, and only one has a subtle
+requirement.
+
+<Callout type="tip" title="MemoryStore is the reference implementation">
+`new MemoryStore()` is a complete store you can read in one sitting. Use it to
+get running, then port it. Working adapters for Postgres, Prisma, Drizzle,
+Redis and MongoDB are on [store adapters](/docs/storage/adapters).
+</Callout>
+
+<Callout type="danger" title="MemoryStore is not for production">
+It loses everything on restart, and nothing is shared between processes. With
+more than one worker, a challenge issued by worker A cannot be found by worker
+B, so roughly every other login fails with `challenge_not_found`. On serverless
+it fails even more often, because instances are not reused.
+</Callout>
+
+## The three rules
+
+Everything else is a plain read or write. These three are where a store goes
+wrong.
+
+<ApiMethod name="takeChallenge must delete" kind="rule">
+
+Fetching and deleting has to be one operation, atomic if your database can do
+it.
+
+```sql
+DELETE FROM passkey_challenges WHERE challenge = $1 RETURNING *;
+```
+
+<Reason>
+Deleting on read is what makes a challenge single-use, which is what stops a
+captured response from being replayed.
+
+A read followed by a separate delete leaves a window where two concurrent
+requests both see the same challenge and both succeed. Prefer
+`DELETE ... RETURNING` on Postgres, `GETDEL` on Redis, `findOneAndDelete` on
+Mongo, or an interactive transaction on Prisma.
+</Reason>
+
+</ApiMethod>
+
+<ApiMethod name="createUser must persist the id it is given" kind="rule">
+
+```js
+async createUser({ id, username, displayName }) {
+  await db.insert({ id, username, displayName });   // store `id` verbatim
+  return { id, username, displayName };
+}
+```
+
+<Reason>
+passkify generated that ID before the browser prompt appeared, and the
+authenticator has already written it down as the user handle. It comes back on
+every usernameless login.
+
+Substituting your own primary key means the handle on the device no longer
+matches anything in your database, and `login()` can never resolve the account
+again. If you need your own key, keep both columns and index `id` alongside it.
+</Reason>
+
+</ApiMethod>
+
+<ApiMethod name="Index what gets looked up" kind="rule">
+
+<PropList>
+  <Prop name="credentials.id" type="unique">
+    Read on every single login, across all users.
+  </Prop>
+  <Prop name="credentials.user_id" type="index">
+    Read on every options call, to build `excludeCredentials` and
+    `allowCredentials`.
+  </Prop>
+  <Prop name="users.username" type="unique, case-insensitive">
+    Read on every username-first login and every signup.
+  </Prop>
+  <Prop name="challenges.challenge" type="primary key">
+    Read once per ceremony.
+  </Prop>
+</PropList>
+
+</ApiMethod>
+
+## The records
+
+### PasskeyUser
+
+```ts
+{ id: string, username: string, displayName: string }
+```
+
+<PropList>
+  <Prop name="id" type="string" required>
+    Becomes the WebAuthn user handle. Three constraints: stable forever,
+    not personal data, and at most 64 bytes UTF-8 encoded.
+    Use a UUID.
+  </Prop>
+  <Prop name="username" type="string" required>
+    What the visitor types to identify themselves. Match it
+    case-insensitively; people do not remember capitalisation.
+  </Prop>
+  <Prop name="displayName" type="string" required>
+    Shown in the OS passkey picker.
+  </Prop>
+</PropList>
+
+<Reason title="Why the user handle must not be an email address">
+User handles sit in the clear on the authenticator and are visible in the
+user's password manager, so they leak to anywhere the credential is stored.
+They are also permanent: an email change would orphan every passkey on the
+account.
+</Reason>
+
+### PasskeyCredential
+
+```ts
+{
+  id: string,            // base64url credential ID, unique across ALL users
+  userId: string,
+  publicKey: string,     // base64url COSE key bytes
+  algorithm: number,     // COSE identifier, -7 for ES256
+  counter: number,
+  transports?: string[],
+  deviceType: 'singleDevice' | 'multiDevice',
+  backedUp: boolean,
+  aaguid: string,
+  createdAt: Date,
+  lastUsedAt?: Date,
+  nickname?: string,
+}
+```
+
+<Callout type="note" title="None of this is secret">
+It is public keys and metadata. It still deserves the integrity protection your
+users table gets: an attacker who can *insert* a row here can sign in as
+anyone.
+</Callout>
+
+### PasskeyChallenge
+
+```ts
+{
+  challenge: string,     // base64url, also the primary key
+  kind: 'registration' | 'authentication',
+  userId?: string,
+  expiresAt: Date,
+  context?: Record<string, unknown>,
+}
+```
+
+<Reason title="Why context exists">
+It carries the parameters that must survive between the two halves of a
+ceremony: the username for an account that does not exist yet, and the
+`userVerification` policy the ceremony was started under.
+
+Recording the policy is what stops a stricter per-ceremony requirement from
+being silently dropped at verification. Store it as JSON and hand it back
+unchanged.
+</Reason>
+
+## Methods
+
+<ApiMethod
+  name="getUserByUsername"
+  signature="getUserByUsername(username: string): Promise<PasskeyUser | null>"
+>
+
+Look up an account by the username the visitor typed. Return `null` when there
+is none; throwing is for infrastructure failures.
+
+Match case-insensitively.
+
+</ApiMethod>
+
+<ApiMethod
+  name="getUserById"
+  signature="getUserById(id: string): Promise<PasskeyUser | null>"
+>
+
+Look up an account by its user handle. Called on every usernameless login, so
+this one is hot.
+
+</ApiMethod>
+
+<ApiMethod
+  name="createUser"
+  signature="createUser(input: { id, username, displayName }): Promise<PasskeyUser>"
+>
+
+Create an account. Persist `input.id` verbatim; see the rule above.
+
+<Callout type="note" title="Only called for passkey-first signup">
+If your app only ever adds passkeys from account settings, this method can
+throw. passkify calls it only for a registration started with `username`
+rather than `userId`.
+</Callout>
+
+</ApiMethod>
+
+<ApiMethod
+  name="createCredential"
+  signature="createCredential(credential: PasskeyCredential): Promise<void>"
+>
+
+Persist a newly verified credential. Called once, after every check has passed.
+
+</ApiMethod>
+
+<ApiMethod
+  name="getCredentialById"
+  signature="getCredentialById(id: string): Promise<PasskeyCredential | null>"
+>
+
+Fetch by base64url credential ID, across all users. The single hottest call in
+the library.
+
+<Reason title="Why it is not scoped to a user">
+At the point this runs during a usernameless login there is no user yet: the
+credential is what identifies the account. Scoping the lookup would make that
+flow impossible.
+
+It is also how registration detects a credential already registered to somebody
+else, which a per-user query would miss.
+</Reason>
+
+</ApiMethod>
+
+<ApiMethod
+  name="listCredentialsByUserId"
+  signature="listCredentialsByUserId(userId: string): Promise<PasskeyCredential[]>"
+>
+
+Every credential on an account. Used for `excludeCredentials`,
+`allowCredentials`, and the settings page.
+
+</ApiMethod>
+
+<ApiMethod
+  name="updateCredential"
+  signature="updateCredential(id: string, changes: Partial<Pick<PasskeyCredential, 'counter' | 'lastUsedAt' | 'backedUp' | 'nickname'>>): Promise<void>"
+>
+
+Apply a partial update. Only the four listed fields are ever changed.
+
+<Reason title="Why only four fields are mutable">
+Everything else on a credential is fixed at registration. The public key, the
+algorithm and the credential ID are what the signature is checked against, so a
+code path that could rewrite them would be a code path that could replace a
+user's key.
+
+Narrowing the type means that path does not exist.
+</Reason>
+
+</ApiMethod>
+
+<ApiMethod
+  name="deleteCredential"
+  signature="deleteCredential(id: string): Promise<void>"
+>
+
+Remove a credential. Deleting one that does not exist should be a no-op, not an
+error.
+
+</ApiMethod>
+
+<ApiMethod
+  name="saveChallenge"
+  signature="saveChallenge(challenge: PasskeyChallenge): Promise<void>"
+>
+
+Store an outstanding challenge. If your store has native TTL, use it; passkify
+also checks `expiresAt` itself, so expiry is enforced either way.
+
+</ApiMethod>
+
+<ApiMethod
+  name="takeChallenge"
+  signature="takeChallenge(challenge: string): Promise<PasskeyChallenge | null>"
+>
+
+Fetch **and delete**, atomically. Return `null` if missing or expired. See the
+rule above.
+
+</ApiMethod>
+
+## Next
+
+- [Store adapters](/docs/storage/adapters) for Postgres, Prisma, Drizzle, Redis and MongoDB.

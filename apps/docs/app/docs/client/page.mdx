@@ -1,0 +1,331 @@
+export const metadata = {
+  title: 'Client API',
+  description: 'register, login, autofill, capability detection, and the low-level ceremony calls.',
+};
+
+```js
+import { register, login } from 'passkify/client';
+```
+
+Roughly 6.5 kB gzipped, no dependencies, no Node built-ins. Runs in any bundler
+or straight from a `<script type="module">`.
+
+<Callout type="note" title="Browser only">
+These functions touch `navigator.credentials`. In React Server Components or
+any server-rendered framework, call them from a client component or an event
+handler. Importing at module scope in a server file throws `unsupported` with a
+message saying so.
+</Callout>
+
+## The two calls
+
+<ApiMethod
+  name="register"
+  signature="register(input?: RegisterInput): Promise<PasskeyClientResult>"
+>
+
+Registers a passkey. Does the whole round trip: fetches options from your
+server, runs the WebAuthn ceremony, posts the result back, returns the verified
+user.
+
+<PropList>
+  <Prop name="username" type="string">
+    For a new account. Omit it when a signed-in user is adding another device;
+    the server then takes the account from the session.
+  </Prop>
+  <Prop name="displayName" type="string" defaultValue="username">
+    Shown in the OS passkey picker.
+  </Prop>
+  <Prop name="signal" type="AbortSignal">
+    Cancel the ceremony from your own controller, for example on unmount or a
+    route change.
+  </Prop>
+  <Prop name="config" type="ClientConfig">
+    Per-call override of `configure()`.
+  </Prop>
+</PropList>
+
+<Returns type="{ verified: true; user; credentialId; isNewUser? }" />
+
+```js
+const { user, isNewUser } = await register({ username: 'ada' });
+```
+
+</ApiMethod>
+
+<ApiMethod
+  name="login"
+  signature="login(input?: LoginInput): Promise<PasskeyClientResult>"
+>
+
+Signs in.
+
+```js
+const { user } = await login();              // usernameless, prefer this
+const { user } = await login({ username });  // scoped to one account
+```
+
+<Reason title="Call it with no arguments">
+The browser already knows which passkeys exist for your domain and will show a
+picker. Passing a username adds a text field, a screen, and a failure mode
+without buying anything, and it makes your login form an
+account-enumeration surface. Pass one only for authenticators that cannot store
+discoverable credentials.
+</Reason>
+
+</ApiMethod>
+
+## Conditional UI
+
+<ApiMethod
+  name="signInWithAutofill"
+  signature="signInWithAutofill(input?: AutofillInput): Promise<PasskeyClientResult | null>"
+>
+
+Offers passkeys inside the browser's own autofill dropdown, above the saved
+usernames. This is the best sign-in experience passkeys can give: no button, no
+picker, one tap.
+
+```js
+signInWithAutofill()
+  .then((result) => { if (result) location.href = '/dashboard'; })
+  .catch(() => {});
+```
+
+Your username input needs the right autocomplete token:
+
+```html
+<input autocomplete="username webauthn" />
+```
+
+<Callout type="danger" title="Never await this in a way that blocks rendering">
+It resolves only when the visitor picks a passkey from the dropdown, which may
+be never. Treat it as a listener you start and forget, not a step in a
+sequence. It returns `null` immediately when the browser cannot do conditional
+mediation.
+</Callout>
+
+<Reason title="Why the rejection is safe to swallow">
+The common rejection is an `AbortError`, which happens the moment the visitor
+clicks your ordinary sign-in button instead: browsers permit only one
+outstanding WebAuthn request, so `login()` cancels the pending autofill one.
+
+That is normal operation, not a failure. If you surface it, everyone who ignores
+the dropdown sees an error toast.
+</Reason>
+
+</ApiMethod>
+
+## Capability detection
+
+Use these to decide how prominently to offer passkeys, not whether to offer
+them.
+
+<ApiMethod name="isSupported" signature="isSupported(): boolean">
+
+Whether WebAuthn exists at all. Synchronous, safe to call during render.
+
+</ApiMethod>
+
+<ApiMethod
+  name="isPlatformAuthenticatorAvailable"
+  signature="isPlatformAuthenticatorAvailable(): Promise<boolean>"
+>
+
+Whether there is a built-in authenticator: Touch ID, Face ID, Windows Hello, an
+Android screen lock.
+
+<Reason title="False does not mean 'no passkeys'">
+It means there is no sensor built into *this* machine. The visitor may still
+have a phone they can scan a QR code with, or a security key in their pocket.
+
+Use it to decide between "Sign in with Touch ID" as a prominent button and
+"Sign in with a passkey" tucked under more options. Do not use it to hide
+passkeys entirely.
+</Reason>
+
+</ApiMethod>
+
+<ApiMethod
+  name="isAutofillAvailable"
+  signature="isAutofillAvailable(): Promise<boolean>"
+>
+
+Whether conditional mediation is supported. `signInWithAutofill` calls this
+itself, so you rarely need it directly.
+
+</ApiMethod>
+
+## Configuration
+
+<ApiMethod name="configure" signature="configure(config: ClientConfig): void">
+
+Sets defaults for every subsequent call. Optional: the defaults work if you
+mounted the server at `/passkey` on the same origin.
+
+<PropList>
+  <Prop name="baseUrl" type="string" defaultValue="'/passkey'">
+    Where your server routes live. Must match the adapter's `basePath`.
+  </Prop>
+  <Prop name="headers" type="Record<string, string>">
+    Sent on every request. This is where a CSRF token goes.
+  </Prop>
+  <Prop name="credentials" type="RequestCredentials" defaultValue="'same-origin'">
+    Set to `'include'` if your API is on a different origin and relies on
+    cookies.
+  </Prop>
+  <Prop name="fetch" type="typeof fetch">
+    Bring your own, for interceptors, retries or tests.
+  </Prop>
+</PropList>
+
+```js
+configure({
+  baseUrl: '/api/passkey',
+  headers: { 'x-csrf-token': token },
+});
+```
+
+</ApiMethod>
+
+## Lower-level ceremony calls
+
+For when your backend is not passkify, or your routes do not follow the
+`/register/start` convention. These run only the WebAuthn half and hand you a
+JSON-safe object.
+
+<ApiMethod
+  name="createCredential"
+  signature="createCredential(options: RegistrationOptionsJSON, signal?: AbortSignal): Promise<RegistrationResponseJSON>"
+>
+
+```js
+import { createCredential } from 'passkify/client';
+
+const options  = await fetch('/my/route').then((r) => r.json());
+const response = await createCredential(options);
+await fetch('/my/other/route', { method: 'POST', body: JSON.stringify(response) });
+```
+
+</ApiMethod>
+
+<ApiMethod
+  name="getAssertion"
+  signature="getAssertion(options: AuthenticationOptionsJSON, extras?: { signal?: AbortSignal; mediation?: CredentialMediationRequirement }): Promise<AuthenticationResponseJSON>"
+>
+
+The login equivalent.
+
+</ApiMethod>
+
+<Reason title="What these save you, even with your own backend">
+Every `ArrayBuffer` in the WebAuthn API has to be base64url-encoded to survive
+`JSON.stringify`, and decoded again on the way in. Getting one field wrong
+produces an error message that points nowhere near the mistake, usually a
+`NotAllowedError` with no detail.
+
+Newer browsers expose `PublicKeyCredential.parseCreationOptionsFromJSON` and
+`credential.toJSON()`, which do this correctly. These functions use them where
+available and fall back to a hand-written conversion where not, so you get the
+native path on modern browsers without dropping older ones.
+</Reason>
+
+<ApiMethod name="cancelPendingCeremony" signature="cancelPendingCeremony(): void">
+
+Aborts whatever ceremony is in flight.
+
+<Reason>
+Browsers allow exactly one outstanding WebAuthn request, and a
+`signInWithAutofill()` left running counts. `register`, `login` and
+`signInWithAutofill` already cancel each other, so you need this only when
+calling `navigator.credentials` directly elsewhere, or when tearing down a
+sign-in component.
+</Reason>
+
+</ApiMethod>
+
+## Errors
+
+Everything throws [`PasskeyError`](/docs/errors) with a stable `code`.
+
+```js
+import { login, PasskeyError } from 'passkify/client';
+
+try {
+  await login();
+} catch (error) {
+  if (error instanceof PasskeyError) {
+    if (error.isUserCancellation) return;          // they closed the prompt
+    if (error.code === 'unknown_credential') return showSignUpPrompt();
+    showMessage(error.message);
+  }
+}
+```
+
+<Callout type="tip" title="Treat cancelled as a non-event">
+`error.isUserCancellation` is true when the visitor dismissed the prompt or it
+timed out. That is the single most common outcome after a successful login, and
+showing an error toast for it trains people to ignore your toasts.
+</Callout>
+
+### Browser errors are deliberately vague
+
+The browser will not tell you *why* a ceremony failed, because a precise answer
+would let a page probe which credentials a visitor holds. `NotAllowedError`
+covers "cancelled", "timed out" and "no matching credential" alike.
+
+passkify maps the `DOMException` names to codes and writes messages aimed at the
+developer reading the console:
+
+| DOMException | Code | Usually means |
+| --- | --- | --- |
+| `NotAllowedError` | `cancelled` | Dismissed, timed out, or no matching passkey |
+| `AbortError` | `cancelled` | Superseded by another ceremony, or your signal fired |
+| `InvalidStateError` | `already_registered` | This device already holds a passkey for the account |
+| `SecurityError` | `insecure_context` | Not HTTPS, or `rpID` does not match the page |
+| `NotSupportedError` | `unsupported` | No authenticator supports the requested algorithms |
+| `ConstraintError` | `not_allowed` | UV or a discoverable credential was required, none available |
+
+## React
+
+```tsx
+'use client';
+
+import { useEffect, useState } from 'react';
+import { register, login, signInWithAutofill, configure, PasskeyError } from 'passkify/client';
+
+configure({ baseUrl: '/api/passkey' });
+
+export function SignIn() {
+  const [status, setStatus] = useState('');
+
+  useEffect(() => {
+    const controller = new AbortController();
+    signInWithAutofill({ signal: controller.signal })
+      .then((result) => { if (result) window.location.assign('/'); })
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
+
+  const signIn = async () => {
+    try {
+      await login();
+      window.location.assign('/');
+    } catch (error) {
+      if (error instanceof PasskeyError && error.isUserCancellation) return;
+      setStatus(error instanceof Error ? error.message : 'Something went wrong.');
+    }
+  };
+
+  return (
+    <>
+      <input autoComplete="username webauthn" />
+      <button onClick={signIn}>Sign in with a passkey</button>
+      {status && <p role="alert">{status}</p>}
+    </>
+  );
+}
+```
+
+The `AbortController` in the cleanup matters: without it, a pending autofill
+request survives unmount and blocks the next ceremony.

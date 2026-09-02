@@ -1,0 +1,159 @@
+export const metadata = {
+  title: 'Introduction',
+  description:
+    'passkify adds passkeys to a website: client and server in one npm package, zero runtime dependencies.',
+};
+
+```bash
+npm install passkify
+```
+
+Written in TypeScript, shipped as both ESM and CommonJS, and about 6.5 kB
+gzipped in the browser.
+
+## The problem it solves
+
+Passkeys are a good idea wrapped in a specification that is genuinely hard to
+implement. Three things make it harder than it looks:
+
+- The browser API hands you `ArrayBuffer` values that cannot survive
+  `JSON.stringify`, so every field has to be base64url-encoded by hand before it
+  can reach your server.
+- The server side needs a CBOR parser, COSE public-key handling, and signature
+  verification across several algorithms, all operating on bytes an attacker
+  controls.
+- Roughly fifteen separate checks have to pass before an assertion means
+  anything. Miss one and you get either a login that never works or, worse, a
+  login that always works.
+
+passkify does that part. You get four server methods, two browser calls, and a
+storage interface.
+
+## What it looks like
+
+<Tabs defaultValue="server">
+<TabsList>
+  <TabsTrigger value="server">server.js</TabsTrigger>
+  <TabsTrigger value="browser">browser.js</TabsTrigger>
+</TabsList>
+
+<TabsContent value="server">
+
+```js
+import { PasskeyServer, MemoryStore } from 'passkify';
+
+const passkeys = new PasskeyServer({
+  rpName: 'Acme',
+  origin: 'https://acme.com',
+  store: new MemoryStore(),
+});
+
+app.use(passkeys.express({
+  onLogin: (req, res, { user }) => { req.session.userId = user.id; },
+}));
+```
+
+</TabsContent>
+
+<TabsContent value="browser">
+
+```js
+import { register, login } from 'passkify/client';
+
+await register({ username: 'ada' });   // sign up
+await login();                         // sign in, no username needed
+```
+
+</TabsContent>
+</Tabs>
+
+That is a working passwordless login.
+
+## What it deliberately does not do
+
+Knowing where the edges are saves you an afternoon.
+
+<PropList>
+  <Prop name="Session management" type="yours">
+    A verified `finishAuthentication` means "this person proved possession of a
+    registered credential, just now". Turning that into a session is your
+    existing code's job, and passkify does not want to own your cookies.
+  </Prop>
+  <Prop name="Account recovery" type="yours">
+    The hardest part of going passwordless, and not something a library can
+    decide. The [security guide](/docs/guides/security) covers the options.
+  </Prop>
+  <Prop name="A database" type="yours">
+    passkify never talks to storage directly. You implement
+    [`PasskeyStore`](/docs/storage) against whatever you already run.
+  </Prop>
+  <Prop name="Attestation trust" type="partial">
+    Statements are verified when present, but passkify does not ship a FIDO
+    Metadata Service blob, so it will not claim an authenticator is a genuine
+    YubiKey. See [attestation](/docs/guides/security#attestation).
+  </Prop>
+</PropList>
+
+## Design decisions worth knowing up front
+
+<ApiMethod name="Failure throws, it does not return a flag" kind="principle">
+
+`finishRegistration` and `finishAuthentication` never return
+`{ verified: false }`. Any failure is a thrown
+[`PasskeyError`](/docs/errors).
+
+<Reason>
+A library that returns a result object invites `if (result.verified)`, and
+invites forgetting it. Forgetting it turns a failed verification into a
+successful login. There is no such shape here to forget.
+</Reason>
+
+</ApiMethod>
+
+<ApiMethod name="Challenges are single use, enforced by the store contract" kind="principle">
+
+[`takeChallenge`](/docs/storage#takechallenge) fetches **and deletes**. It is
+called once per ceremony, and the delete happens whether verification then
+succeeds or fails.
+
+<Reason>
+Deleting on read is what stops a captured response from being replayed. Putting
+the delete inside the store method rather than in calling code means there is no
+path through the library that forgets to do it.
+</Reason>
+
+</ApiMethod>
+
+<ApiMethod name="Registration will not take over an existing username" kind="principle">
+
+`startRegistration({ username })` throws if the account already exists. Adding a
+passkey to an existing account requires `startRegistration({ userId })`, and the
+mounted routes take that ID from your session.
+
+<Reason>
+Without this rule, anyone who knows a username could attach their own passkey to
+that account and sign in as them. It is the single most common way to get a
+passkey integration catastrophically wrong, so the API refuses to express it.
+</Reason>
+
+</ApiMethod>
+
+<ApiMethod name="Login does not confirm whether an account exists" kind="principle">
+
+`startAuthentication({ username: 'nobody' })` returns a normal, well-formed
+challenge rather than a 404.
+
+<Reason>
+Answering honestly would turn the login form into a free account-enumeration
+oracle. The ceremony fails later at verification, exactly like any other bad
+attempt, and an attacker learns nothing.
+</Reason>
+
+</ApiMethod>
+
+## Where to go next
+
+- [Installation](/docs/installation) if you want the entry points and requirements.
+- [Quickstart](/docs/quickstart) for a running app in five minutes.
+- [How passkeys work](/docs/how-passkeys-work) if the concepts are new. Ten
+  minutes here will save you an hour of debugging `rpID`.

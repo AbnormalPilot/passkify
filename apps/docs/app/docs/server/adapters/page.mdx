@@ -1,0 +1,230 @@
+export const metadata = {
+  title: 'HTTP adapters',
+  description: 'The Express middleware, the fetch handler, and the routes they mount.',
+};
+
+Rather than writing four routes by hand, mount an adapter. Both expose the same
+endpoints and share the same internal dispatcher, so they cannot behave
+differently.
+
+## Routes
+
+Relative to `basePath`, which defaults to `/passkey`.
+
+| Method | Path | Body | Session |
+| --- | --- | --- | --- |
+| `POST` | `/register/start` | `{ username?, displayName? }` | no |
+| `POST` | `/register/finish` | the browser's response | no |
+| `POST` | `/login/start` | `{ username? }` | no |
+| `POST` | `/login/finish` | the browser's response | no |
+| `GET` | `/credentials` | | **yes** |
+| `PATCH` | `/credentials/:id` | `{ nickname }` | **yes** |
+| `DELETE` | `/credentials/:id` | | **yes** |
+
+Responses are JSON with `cache-control: no-store`.
+
+<Reason title="Why no-store on every response">
+These endpoints are a challenge and response protocol. A cached
+`/login/start` would hand the same challenge to two different visitors, and a
+cached `/login/finish` would replay a successful verification. Neither is
+something an intermediary should ever be free to do.
+</Reason>
+
+<Callout type="warning" title="A session overrides the request body on register/start">
+When `getSessionUserId` returns an ID, `POST /register/start` ignores any
+`username` in the body and registers against the session's account.
+
+Trusting the body there would let a signed-in visitor attach their passkey to
+somebody else's account by naming it. See
+[registration](/docs/server/registration).
+</Callout>
+
+## Express
+
+<ApiMethod
+  name="express"
+  signature="express(options?: ExpressAdapterOptions): (req, res, next) => Promise<void>"
+>
+
+```js
+app.use(express.json());
+app.use(passkeys.express({
+  basePath: '/passkey',
+  getSessionUserId: (req) => req.session.userId ?? null,
+  onLogin:    (req, res, { user }) => { req.session.userId = user.id; },
+  onRegister: (req, res, { user }) => { req.session.userId = user.id; },
+}));
+```
+
+<PropList>
+  <Prop name="basePath" type="string" defaultValue="'/passkey'">
+    Where the routes live. Must match the client's `baseUrl`.
+  </Prop>
+  <Prop name="getSessionUserId" type="(req) => string | null | Promise<string | null>">
+    Resolves the signed-in account. Supplying it unlocks two things: signed-in
+    users can add another passkey, and the `/credentials` routes stop
+    answering 401.
+  </Prop>
+  <Prop name="onRegister" type="(req, res, result) => void | Promise<void>">
+    After a successful registration. Set a session here if you sign people in
+    on signup.
+  </Prop>
+  <Prop name="onLogin" type="(req, res, result) => void | Promise<void>">
+    After a successful login. This is where your session cookie gets set.
+  </Prop>
+</PropList>
+
+<Reason title="Why session hooks live on the adapter, not on config.hooks">
+`hooks.onAuthenticated` receives the user and the credential and nothing else,
+because it is not request-scoped. Setting a cookie needs the response object.
+
+Keeping the two separate means the adapter hook has exactly what it needs for
+session work, and the config hook stays usable from code paths that have no HTTP
+request at all, such as a CLI or a background job.
+</Reason>
+
+### Behaviour worth knowing
+
+<PropList>
+  <Prop name="Unmatched paths call next()" type="pass through">
+    Safe to mount at the top of the stack; it only claims paths under
+    `basePath`.
+  </Prop>
+  <Prop name="It parses its own body" type="no body-parser needed">
+    If `req.body` is already set, it is used. Otherwise the adapter reads and
+    parses the stream itself, capped at 512 kB, so the middleware also works on
+    a bare `node:http` server.
+  </Prop>
+  <Prop name="5xx failures go to next(error)" type="error handling">
+    Client errors are answered as JSON. A genuine fault is forwarded to your
+    error handler, so it reaches your logs instead of disappearing into a
+    response body.
+  </Prop>
+</PropList>
+
+</ApiMethod>
+
+## Fetch
+
+<ApiMethod
+  name="handler"
+  signature="handler(options?: FetchAdapterOptions): (request: Request) => Promise<Response>"
+>
+
+For Next.js App Router, Hono, Bun, Deno, Remix and Cloudflare Workers.
+
+```ts
+// app/api/passkey/[...passkey]/route.ts
+const handler = passkeys.handler({
+  basePath: '/api/passkey',
+  getSessionUserId: async (request) => readSession(request),
+  onLogin: async (_request, { user }) => ({
+    'set-cookie': await createSession(user.id),
+  }),
+});
+
+export { handler as GET, handler as POST, handler as PATCH, handler as DELETE };
+```
+
+<PropList>
+  <Prop name="basePath" type="string" defaultValue="'/passkey'">
+    Must match where you mounted the handler. A mismatch returns a 404 whose
+    message says exactly this, rather than a bare "not found".
+  </Prop>
+  <Prop name="getSessionUserId" type="(request: Request) => string | null | Promise<string | null>">
+    Same role as the Express version, reading from the standard `Request`.
+  </Prop>
+  <Prop name="onRegister" type="(request, result) => void | Response | HeadersInit | Promise<...>">
+    Return a `Response` to take over the reply entirely, or a `HeadersInit` to
+    merge into the default JSON reply.
+  </Prop>
+  <Prop name="onLogin" type="(request, result) => void | Response | HeadersInit | Promise<...>">
+    Same contract.
+  </Prop>
+</PropList>
+
+<Reason title="Why the hooks can return either a Response or headers">
+There is no mutable response object in the fetch model, so the hook has to be
+able to influence the reply through its return value.
+
+Most of the time you only want to add a `Set-Cookie` and keep the standard JSON
+body, so returning a `HeadersInit` covers that with one line. Occasionally you
+want a redirect instead of JSON, which needs the whole `Response`. Supporting
+both keeps the common case short without blocking the uncommon one.
+</Reason>
+
+</ApiMethod>
+
+### Framework mounting
+
+```ts
+// Hono
+app.all('/passkey/*', (c) => handler(c.req.raw));
+
+// Bun
+Bun.serve({ fetch: handler });
+
+// Remix
+export const action = ({ request }) => handler(request);
+
+// SvelteKit, src/routes/passkey/[...path]/+server.ts
+export const GET = ({ request }) => handler(request);
+export const POST = ({ request }) => handler(request);
+```
+
+<Callout type="warning" title="Node runtime only">
+The server half uses `node:crypto` and does not run on an edge runtime. In
+Next.js, `export const runtime = 'nodejs'`. The browser half has no such
+constraint.
+</Callout>
+
+## Request and response shapes
+
+Both `finish` routes accept the ceremony response either bare or wrapped:
+
+```js
+// Both work.
+fetch('/passkey/login/finish', { method: 'POST', body: JSON.stringify(assertion) });
+fetch('/passkey/login/finish', { method: 'POST', body: JSON.stringify({ response: assertion }) });
+```
+
+<Reason>
+They are told apart by `rawId`, which is present at the top level of a real
+ceremony response and only there. Both shapes are natural to post, and telling
+somebody they picked the wrong one is a poor use of a debugging session.
+</Reason>
+
+Success:
+
+```js
+{ verified: true, user: { id, username, displayName }, credentialId, isNewUser }
+```
+
+Failure, with the status from
+[`PasskeyError.status`](/docs/errors):
+
+```js
+{ error: 'origin_mismatch', message: 'origin "https://evil.example.net" is not in the allowed list' }
+```
+
+## Writing the routes yourself
+
+The adapters are convenience. The four methods are the API.
+
+```js
+app.post('/auth/passkey/login/begin', async (req, res) => {
+  const { options } = await passkeys.startAuthentication();
+  res.json(options);
+});
+
+app.post('/auth/passkey/login/complete', async (req, res) => {
+  const { user } = await passkeys.finishAuthentication(req.body);
+  req.session.userId = user.id;
+  res.json({ ok: true });
+});
+```
+
+Point the client at them with
+`configure({ baseUrl })`, or use the
+[lower-level ceremony calls](/docs/client#createcredential) if your paths do not
+follow the `/register/start` convention.

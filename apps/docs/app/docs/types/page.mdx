@@ -1,0 +1,383 @@
+export const metadata = {
+  title: 'Types',
+  description: 'Every exported interface and type alias.',
+};
+
+Everything exported from `passkify` and `passkify/client`. All of it ships with
+the package; there is no separate `@types` install.
+
+## Server
+
+<ApiMethod name="PasskeyServerConfig" kind="interface">
+
+The constructor argument. Every field is documented on
+[configuration](/docs/server/configuration).
+
+```ts
+interface PasskeyServerConfig {
+  rpName: string;
+  origin: string | readonly OriginMatcher[];
+  store: PasskeyStore;
+
+  rpID?: string;
+  userVerification?: 'required' | 'preferred' | 'discouraged';
+  residentKey?: 'required' | 'preferred' | 'discouraged';
+  authenticatorAttachment?: 'platform' | 'cross-platform';
+  attestation?: 'none' | 'indirect' | 'direct' | 'enterprise';
+  attestationRootCertificates?: readonly (string | Uint8Array)[];
+  timeout?: number;
+  challengeTimeout?: number;
+  challengeSize?: number;
+  supportedAlgorithms?: readonly number[];
+  requireBackupEligible?: boolean;
+  hooks?: PasskeyHooks;
+}
+```
+
+</ApiMethod>
+
+<ApiMethod name="OriginMatcher" kind="type">
+
+```ts
+type OriginMatcher = string | RegExp | ((origin: string) => boolean);
+```
+
+<Reason>
+Exact strings are what you want. The other two exist for wildcard-subdomain
+tenancy, where the set of valid origins is not known at boot. Anchor any
+pattern you write: an unanchored `RegExp` that matches
+`https://acme.com.evil.net` hands an attacker your users' credentials.
+</Reason>
+
+</ApiMethod>
+
+<ApiMethod name="PasskeyHooks" kind="interface">
+
+```ts
+interface PasskeyHooks {
+  onRegistered?: (event: {
+    user: PasskeyUser;
+    credential: PasskeyCredential;
+    isNewUser: boolean;
+  }) => void | Promise<void>;
+
+  onAuthenticated?: (event: {
+    user: PasskeyUser;
+    credential: PasskeyCredential;
+  }) => void | Promise<void>;
+
+  onCounterRegression?: (event: {
+    user: PasskeyUser;
+    credential: PasskeyCredential;
+    storedCounter: number;
+    presentedCounter: number;
+  }) => boolean | Promise<boolean>;
+}
+```
+
+</ApiMethod>
+
+<ApiMethod name="StartRegistrationInput" kind="interface">
+
+```ts
+interface StartRegistrationInput {
+  username?: string;
+  displayName?: string;
+  userId?: string;
+  userVerification?: 'required' | 'preferred' | 'discouraged';
+}
+```
+
+</ApiMethod>
+
+<ApiMethod name="StartRegistrationResult" kind="interface">
+
+```ts
+interface StartRegistrationResult {
+  options: RegistrationOptionsJSON;
+  userId: string;
+  isNewUser: boolean;
+}
+```
+
+</ApiMethod>
+
+<ApiMethod name="VerifyRegistrationResult" kind="interface">
+
+```ts
+interface VerifyRegistrationResult {
+  verified: true;
+  user: PasskeyUser;
+  credential: PasskeyCredential;
+  isNewUser: boolean;
+  attestation: AttestationResult;
+}
+```
+
+<Reason title="Why verified is the literal true, not boolean">
+There is no code path that returns `false`; failures throw. Typing it as the
+literal makes that visible in an editor, and makes
+`if (!result.verified)` a dead branch TypeScript will flag rather than a check
+somebody relies on.
+</Reason>
+
+</ApiMethod>
+
+<ApiMethod name="StartAuthenticationInput" kind="interface">
+
+```ts
+interface StartAuthenticationInput {
+  username?: string;
+  userId?: string;
+  userVerification?: 'required' | 'preferred' | 'discouraged';
+}
+```
+
+</ApiMethod>
+
+<ApiMethod name="StartAuthenticationResult" kind="interface">
+
+```ts
+interface StartAuthenticationResult {
+  options: AuthenticationOptionsJSON;
+  userId?: string;   // present only when scoped to a known account
+}
+```
+
+</ApiMethod>
+
+<ApiMethod name="VerifyAuthenticationResult" kind="interface">
+
+```ts
+interface VerifyAuthenticationResult {
+  verified: true;
+  user: PasskeyUser;
+  credential: PasskeyCredential;
+  signCount: number;
+  userVerified: boolean;
+}
+```
+
+</ApiMethod>
+
+<ApiMethod name="PublicCredentialInfo" kind="interface">
+
+What `listCredentials` returns. Safe to send to the browser.
+
+```ts
+interface PublicCredentialInfo {
+  id: string;
+  nickname?: string;
+  deviceType: 'singleDevice' | 'multiDevice';
+  backedUp: boolean;
+  transports?: string[];
+  aaguid: string;
+  createdAt: Date;
+  lastUsedAt?: Date;
+}
+```
+
+</ApiMethod>
+
+<ApiMethod name="AttestationResult" kind="interface">
+
+```ts
+interface AttestationResult {
+  format: string;                                  // 'none' | 'packed' | 'fido-u2f' | 'apple'
+  type: 'none' | 'self' | 'basic' | 'attca';
+  trusted: boolean;
+  certificateChain?: X509Certificate[];
+  attestationCertificateSubject?: string;
+}
+```
+
+<Callout type="note" title="trusted is false unless you supplied roots">
+And honestly so: a chain that validates against nothing proves nothing. See
+[attestation](/docs/guides/security#attestation).
+</Callout>
+
+</ApiMethod>
+
+## Storage
+
+Full documentation on [PasskeyStore](/docs/storage).
+
+```ts
+interface PasskeyUser {
+  id: string;
+  username: string;
+  displayName: string;
+}
+
+interface PasskeyCredential {
+  id: string;
+  userId: string;
+  publicKey: string;
+  algorithm: number;
+  counter: number;
+  transports?: AuthenticatorTransportName[];
+  deviceType: 'singleDevice' | 'multiDevice';
+  backedUp: boolean;
+  aaguid: string;
+  createdAt: Date;
+  lastUsedAt?: Date;
+  nickname?: string;
+}
+
+type ChallengeKind = 'registration' | 'authentication';
+
+interface PasskeyChallenge {
+  challenge: string;
+  kind: ChallengeKind;
+  userId?: string;
+  expiresAt: Date;
+  context?: Record<string, unknown>;
+}
+```
+
+## Wire types
+
+Plain JSON. Every `ArrayBuffer` from the WebAuthn specification is a base64url
+string here, so options and responses survive `fetch` untouched.
+
+<ApiMethod name="Base64URLString" kind="type">
+
+```ts
+type Base64URLString = string;
+```
+
+<Reason>
+An alias rather than a branded type. Branding would catch a raw string passed
+where an encoded one belongs, but it would also force every store
+implementation to cast on the way in from a database driver, which is friction
+on the path most people take.
+</Reason>
+
+</ApiMethod>
+
+```ts
+interface RegistrationOptionsJSON {
+  rp: { id: string; name: string };
+  user: { id: Base64URLString; name: string; displayName: string };
+  challenge: Base64URLString;
+  pubKeyCredParams: Array<{ type: 'public-key'; alg: number }>;
+  timeout?: number;
+  excludeCredentials?: PublicKeyCredentialDescriptorJSON[];
+  authenticatorSelection?: AuthenticatorSelectionJSON;
+  attestation?: AttestationConveyancePreferenceName;
+  extensions?: Record<string, unknown>;
+  hints?: string[];
+}
+
+interface AuthenticationOptionsJSON {
+  challenge: Base64URLString;
+  timeout?: number;
+  rpId?: string;
+  allowCredentials?: PublicKeyCredentialDescriptorJSON[];
+  userVerification?: UserVerificationRequirementName;
+  extensions?: Record<string, unknown>;
+  hints?: string[];
+}
+
+interface RegistrationResponseJSON {
+  id: Base64URLString;
+  rawId: Base64URLString;
+  type: 'public-key';
+  authenticatorAttachment?: 'platform' | 'cross-platform' | null;
+  clientExtensionResults: Record<string, unknown>;
+  response: {
+    clientDataJSON: Base64URLString;
+    attestationObject: Base64URLString;
+    transports?: AuthenticatorTransportName[];
+  };
+}
+
+interface AuthenticationResponseJSON {
+  id: Base64URLString;
+  rawId: Base64URLString;
+  type: 'public-key';
+  authenticatorAttachment?: 'platform' | 'cross-platform' | null;
+  clientExtensionResults: Record<string, unknown>;
+  response: {
+    clientDataJSON: Base64URLString;
+    authenticatorData: Base64URLString;
+    signature: Base64URLString;
+    userHandle?: Base64URLString | null;
+  };
+}
+```
+
+### String unions
+
+```ts
+type AuthenticatorTransportName =
+  'usb' | 'nfc' | 'ble' | 'smart-card' | 'hybrid' | 'internal' | 'cable';
+
+type UserVerificationRequirementName = 'required' | 'preferred' | 'discouraged';
+type ResidentKeyRequirementName      = 'required' | 'preferred' | 'discouraged';
+type AttachmentName                  = 'platform' | 'cross-platform';
+type AttestationConveyancePreferenceName = 'none' | 'indirect' | 'direct' | 'enterprise';
+```
+
+<Reason title="Why these have their own names rather than reusing the DOM types">
+The DOM library's `AuthenticatorTransport` and friends only exist when
+`lib.dom` is loaded. A Node server that does not include the DOM lib would fail
+to compile against them, and adding `lib.dom` to a backend `tsconfig` to satisfy
+an auth library is a bad trade.
+</Reason>
+
+## Algorithms
+
+```ts
+const COSEAlgorithm = {
+  EdDSA: -8,   ES256: -7,    ES384: -35,   ES512: -36,
+  PS256: -37,  PS384: -38,   PS512: -39,
+  RS256: -257, RS384: -258,  RS512: -259,  RS1: -65535,
+} as const;
+```
+
+Offered by default: `ES256` and `RS256`. All eleven can be verified; see
+[supportedAlgorithms](/docs/server/configuration#supportedalgorithms).
+
+## Client
+
+```ts
+interface ClientConfig {
+  baseUrl?: string;
+  fetch?: typeof fetch;
+  headers?: Record<string, string>;
+  credentials?: RequestCredentials;
+}
+
+interface AuthenticatedUser {
+  id: string;
+  username: string;
+  displayName: string;
+}
+
+interface PasskeyClientResult {
+  verified: true;
+  user: AuthenticatedUser;
+  credentialId: string;
+  isNewUser?: boolean;   // registration only
+}
+```
+
+## Errors
+
+```ts
+type PasskeyErrorCode =
+  // browser
+  | 'unsupported' | 'cancelled' | 'already_registered' | 'insecure_context'
+  | 'not_allowed' | 'ceremony_in_progress' | 'server_error'
+  // server
+  | 'malformed_response' | 'challenge_not_found' | 'challenge_mismatch'
+  | 'origin_mismatch' | 'type_mismatch' | 'rpid_mismatch' | 'user_not_present'
+  | 'user_not_verified' | 'bad_signature' | 'counter_regression'
+  | 'unknown_credential' | 'credential_exists' | 'last_credential'
+  | 'unsupported_algorithm'
+  | 'attestation_failed' | 'unsupported_feature' | 'parse_error'
+  | 'configuration_error' | 'unknown_user';
+```
+
+See [errors](/docs/errors) for what each one means.

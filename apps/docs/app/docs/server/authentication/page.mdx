@@ -1,0 +1,212 @@
+export const metadata = {
+  title: 'Authentication',
+  description: 'startAuthentication and finishAuthentication, usernameless and username-first.',
+};
+
+Signing in. Two calls, and two flows that differ only in whether you name the
+account up front.
+
+## startAuthentication
+
+<ApiMethod
+  name="startAuthentication"
+  signature="startAuthentication(input?: StartAuthenticationInput): Promise<StartAuthenticationResult>"
+>
+
+Issues request options. Call it with no arguments for the usernameless flow.
+
+<PropList>
+  <Prop name="username" type="string">
+    Scope the ceremony to one account. Usually unnecessary, see below.
+  </Prop>
+  <Prop name="userId" type="string">
+    Same, by user handle, when you already know who is signing in. Useful for
+    re-authentication before a sensitive action.
+  </Prop>
+  <Prop name="userVerification" type="'required' | 'preferred' | 'discouraged'" defaultValue="config value">
+    Override for this ceremony. Recorded with the challenge and enforced at
+    verification, so a stricter policy cannot be dropped between the two calls.
+  </Prop>
+</PropList>
+
+<Returns type="{ options: AuthenticationOptionsJSON; userId?: string }">
+`userId` is present only when the ceremony was scoped to a known account.
+</Returns>
+
+</ApiMethod>
+
+### The two flows
+
+<Contrast>
+<ContrastItem tone="good" title="Usernameless: prefer this">
+
+```js
+const { options } = await passkeys.startAuthentication();
+```
+
+`allowCredentials` is omitted. The browser lists every passkey for your domain
+and shows a picker. The account is resolved from the user handle in the
+response.
+
+</ContrastItem>
+<ContrastItem tone="bad" title="Username-first: only if you must">
+
+```js
+const { options } = await passkeys.startAuthentication({
+  username: 'ada',
+});
+```
+
+`allowCredentials` names that account's credentials. Needed for authenticators
+that cannot store discoverable credentials.
+
+</ContrastItem>
+</Contrast>
+
+<Reason title="Why usernameless is the recommended path">
+It is the entire point of passkeys. The browser already knows which credentials
+exist for your domain, so asking for a username first adds a screen, a text
+field and a failure mode without buying anything.
+
+It is also better for security: with no `allowCredentials`, the response
+reveals nothing about which accounts exist. See the enumeration note below.
+</Reason>
+
+<Callout type="warning" title="An unknown username does not produce an error">
+`startAuthentication({ username: 'nobody' })` returns a normal, well-formed
+challenge with no `allowCredentials`.
+
+Answering honestly would turn your login form into a free account-enumeration
+oracle: anyone could learn which usernames are registered by watching for a
+404. The ceremony fails later at verification, exactly like any other bad
+attempt.
+
+This means a typo'd username produces `unknown_credential` at the *finish*
+step, not a helpful message at the start. That trade is deliberate.
+</Callout>
+
+## finishAuthentication
+
+<ApiMethod
+  name="finishAuthentication"
+  signature="finishAuthentication(response: AuthenticationResponseJSON): Promise<VerifyAuthenticationResult>"
+>
+
+Verifies the assertion. On success the returned `user` is authenticated.
+
+<Returns type="{ verified: true; user; credential; signCount; userVerified }">
+`userVerified` reports whether the authenticator checked a PIN or biometric, as
+opposed to mere presence. Useful when you allow `'preferred'` but want to demand
+verification before a sensitive action.
+</Returns>
+
+```js
+const { user, userVerified } = await passkeys.finishAuthentication(req.body);
+
+req.session.userId = user.id;
+req.session.strongAuth = userVerified;
+```
+
+</ApiMethod>
+
+### The fourteen checks
+
+In WebAuthn §7.2 order.
+
+| # | Check | Failure code |
+| --- | --- | --- |
+| 1 | Challenge exists, unexpired, consumed on read | `challenge_not_found` |
+| 2 | Challenge was issued for a login | `type_mismatch` |
+| 3 | Signed challenge equals the issued one, constant time | `challenge_mismatch` |
+| 4 | `clientData.type` is `webauthn.get` | `type_mismatch` |
+| 5 | `clientData.origin` is allowed | `origin_mismatch` |
+| 6 | Not run inside a cross-origin frame | `origin_mismatch` |
+| 7 | Credential is registered | `unknown_credential` |
+| 8 | Credential belongs to the account the ceremony was scoped to | `unknown_credential` |
+| 9 | User handle in the response matches the credential's owner | `unknown_credential` |
+| 10 | `rpIdHash` equals SHA-256 of the configured `rpID` | `rpid_mismatch` |
+| 11 | User-present flag set | `user_not_present` |
+| 12 | User-verified flag set, when required | `user_not_verified` |
+| 13 | Signature verifies over `authenticatorData` and the client data hash | `bad_signature` |
+| 14 | Signature counter did not go backwards | `counter_regression` |
+
+<Reason title="Why checks 8 and 9 both exist">
+They defend different flows.
+
+Check 8 covers username-first: the ceremony was started for Ada, so a
+credential belonging to Bob must not satisfy it, even though Bob's credential is
+perfectly valid and his signature verifies.
+
+Check 9 covers usernameless: there is no scoped account, so the user handle in
+the response is what tells you who signed in. It has to agree with the
+credential's stored owner, or an attacker could present a valid signature from
+their own passkey alongside somebody else's handle.
+
+Dropping either one leaves a hole in the flow the other does not cover.
+</Reason>
+
+### The signature check
+
+The authenticator signs `authenticatorData` concatenated with
+`SHA-256(clientDataJSON)`. passkify rebuilds that byte string, loads the stored
+COSE public key, and verifies.
+
+<Reason title="Why the stored key is raw COSE bytes rather than PEM">
+The credential record keeps `publicKey` as the exact CBOR the authenticator
+produced. It is re-parsed on every login into a Node `KeyObject` through a JWK
+import, which puts curve and point validation inside OpenSSL rather than in
+library code.
+
+Storing a converted format would mean the conversion happened once, at
+registration, with no way to revisit it if a bug were found. Keeping the
+original means the parse is re-run and re-validated on every use, and a fix
+applies retroactively to credentials already in your database.
+</Reason>
+
+## The signature counter
+
+Some authenticators increment a counter on every signature. If one arrives
+lower than the stored value, the same credential has signed twice from
+different states, which is what a cloned authenticator looks like.
+
+```js
+hooks: {
+  onCounterRegression: ({ user, storedCounter, presentedCounter }) => {
+    logger.warn('counter went backwards', { userId: user.id, storedCounter, presentedCounter });
+    return false;   // reject
+  },
+}
+```
+
+<Callout type="note" title="Most passkeys report zero forever">
+Synced credentials cannot maintain a coherent counter across devices, so they
+do not try. passkify skips the comparison when both the stored and presented
+counters are zero; otherwise every second login would fail.
+
+Treat the counter as a detection signal, not a defence. An attacker holding the
+private key can report whatever counter they like.
+</Callout>
+
+## Re-authentication
+
+For a sensitive action, run a second ceremony scoped to the signed-in account:
+
+```js
+app.post('/settings/danger/start', requireAuth, async (req, res) => {
+  const { options } = await passkeys.startAuthentication({
+    userId: req.session.userId,
+    userVerification: 'required',   // demand a biometric this time
+  });
+  res.json(options);
+});
+```
+
+Because the requirement is recorded with the challenge, `finishAuthentication`
+enforces `'required'` for this ceremony even though the server default is
+`'preferred'`.
+
+## Next
+
+- [Credential management](/docs/server/credentials)
+- [HTTP adapters](/docs/server/adapters) to skip writing these routes
+- [Security model](/docs/guides/security) for the reasoning behind each check

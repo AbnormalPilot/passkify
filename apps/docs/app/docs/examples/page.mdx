@@ -1,0 +1,376 @@
+export const metadata = {
+  title: 'Examples',
+  description: 'Complete runnable apps for Express and Next.js, with every file listed.',
+};
+
+Every file, in full. Nothing is elided and nothing links away: copy what is on
+this page and it runs.
+
+<Cards>
+  <Card href="#express" title="Express">
+    One server file plus one HTML file. Sign-up, usernameless sign-in, autofill,
+    and a passkey management list.
+  </Card>
+  <Card href="#nextjs-app-router" title="Next.js App Router">
+    Catch-all route handler, shared server instance, signed-cookie session, and
+    a client sign-in component.
+  </Card>
+</Cards>
+
+## Express
+
+A complete app in two files.
+
+### server.js
+
+```js
+import express from 'express';
+import session from 'express-session';
+import { PasskeyServer, MemoryStore } from 'passkify';
+
+const PORT = 3000;
+const ORIGIN = `http://localhost:${PORT}`;
+
+const app = express();
+app.use(express.json());
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET ?? 'dev-only-secret',
+    resave: false,
+    saveUninitialized: false,
+    cookie: { httpOnly: true, sameSite: 'lax' /* secure: true in production */ },
+  }),
+);
+
+const passkeys = new PasskeyServer({
+  rpName: 'Passkify Demo',
+  origin: ORIGIN,            // scheme + host + port, exactly as the browser sees it
+  store: new MemoryStore(),  // development only
+
+  hooks: {
+    onRegistered: ({ user, isNewUser }) =>
+      console.log(isNewUser ? `signed up: ${user.username}` : `added a passkey: ${user.username}`),
+    onAuthenticated: ({ user }) => console.log(`signed in: ${user.username}`),
+  },
+});
+
+app.use(
+  passkeys.express({
+    // Identifies the signed-in visitor. Enables adding a second passkey and
+    // unlocks the credential-management routes.
+    getSessionUserId: (req) => req.session.userId ?? null,
+
+    onRegister: (req, _res, { user }) => {
+      req.session.userId = user.id;
+      req.session.username = user.username;
+    },
+    onLogin: (req, _res, { user }) => {
+      req.session.userId = user.id;
+      req.session.username = user.username;
+    },
+  }),
+);
+
+app.get('/api/me', (req, res) => {
+  if (!req.session.userId) return res.status(401).json({ error: 'not signed in' });
+  res.json({ id: req.session.userId, username: req.session.username });
+});
+
+app.post('/api/signout', (req, res) => {
+  req.session.destroy(() => res.json({ ok: true }));
+});
+
+app.use(express.static('public'));
+app.listen(PORT, () => console.log(ORIGIN));
+```
+
+### public/index.html
+
+```html
+<input id="username" autocomplete="username webauthn" placeholder="username">
+<button id="signup">Create account</button>
+<button id="signin">Sign in</button>
+<div id="status"></div>
+
+<script type="module">
+  import {
+    register, login, signInWithAutofill,
+    isSupported, isPlatformAuthenticatorAvailable, PasskeyError,
+  } from '/passkify/client/index.js';
+
+  const $ = (id) => document.getElementById(id);
+  const say = (message) => { $('status').textContent = message; };
+
+  // Turns a PasskeyError into readable status text, and stays quiet when the
+  // visitor simply dismissed the prompt.
+  const attempt = (label, action) => async () => {
+    say(`${label}...`);
+    try {
+      await action();
+    } catch (error) {
+      if (error instanceof PasskeyError && error.isUserCancellation) return say('Cancelled.');
+      say(error.message);
+    }
+  };
+
+  async function refresh() {
+    const response = await fetch('/api/me');
+    if (!response.ok) return false;
+    const me = await response.json();
+    say(`Signed in as ${me.username}.`);
+
+    const credentials = await (await fetch('/passkey/credentials')).json();
+    console.log('passkeys on this account:', credentials);
+    return true;
+  }
+
+  $('signup').onclick = attempt('Creating your account', async () => {
+    await register({ username: $('username').value.trim() });
+    await refresh();
+  });
+
+  $('signin').onclick = attempt('Signing in', async () => {
+    await login();                 // no username needed
+    await refresh();
+  });
+
+  if (!isSupported()) {
+    say('This browser does not support passkeys.');
+  } else if (!(await refresh())) {
+    if (await isPlatformAuthenticatorAvailable()) {
+      say('Your device has a built-in authenticator ready to go.');
+    }
+    // Offer passkeys in the username field's autofill dropdown. Resolves only
+    // if the visitor picks one, so it must not block anything.
+    signInWithAutofill().then((r) => { if (r) refresh(); }).catch(() => {});
+  }
+</script>
+```
+
+<Callout type="note" title="About that import path">
+A real app writes `import { register } from 'passkify/client'` and lets its
+bundler resolve it. This demo has no bundler, so the server exposes the package
+build as a static directory:
+
+```js
+app.use('/passkify', express.static('node_modules/passkify/dist/esm'));
+```
+</Callout>
+
+### Running it
+
+```bash
+npm install passkify express express-session
+node server.js
+# open http://localhost:3000
+```
+
+`localhost` counts as a secure context, so this works over plain HTTP. See
+[testing on a phone](/docs/guides/troubleshooting#testing-on-a-phone) for
+anything else.
+
+## Next.js App Router
+
+Four files.
+
+### lib/passkeys.ts
+
+```ts
+import { PasskeyServer } from 'passkify';
+import { store } from './store';
+
+if (!process.env.NEXT_PUBLIC_ORIGIN) {
+  throw new Error('NEXT_PUBLIC_ORIGIN is required, for example https://acme.com');
+}
+
+/**
+ * One instance, shared across requests.
+ *
+ * In development Next re-evaluates modules on every edit, so stash it on
+ * `globalThis`. Otherwise each reload gets a fresh store and every in-flight
+ * challenge disappears.
+ */
+const globalForPasskeys = globalThis as unknown as { passkeys?: PasskeyServer };
+
+export const passkeys =
+  globalForPasskeys.passkeys ??
+  new PasskeyServer({
+    rpName: 'Acme',
+    origin: process.env.NEXT_PUBLIC_ORIGIN,
+    store,
+  });
+
+if (process.env.NODE_ENV !== 'production') {
+  globalForPasskeys.passkeys = passkeys;
+}
+```
+
+### lib/session.ts
+
+```ts
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
+export const SESSION_COOKIE = 'session';
+
+const SECRET = process.env.SESSION_SECRET;
+if (!SECRET) throw new Error('SESSION_SECRET is required');
+
+const sign = (value: string): string =>
+  createHmac('sha256', SECRET).update(value).digest('base64url');
+
+export function createSession(userId: string): string {
+  const value = `${userId}.${sign(userId)}`;
+  return [
+    `${SESSION_COOKIE}=${encodeURIComponent(value)}`,
+    'Path=/', 'HttpOnly', 'SameSite=Lax',
+    process.env.NODE_ENV === 'production' ? 'Secure' : '',
+    'Max-Age=2592000',
+  ].filter(Boolean).join('; ');
+}
+
+export function readSession(request: Request): string | null {
+  const header = request.headers.get('cookie');
+  if (!header) return null;
+
+  const match = new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`).exec(header);
+  if (!match) return null;
+
+  const [userId, signature] = decodeURIComponent(match[1]).split('.');
+  if (!userId || !signature) return null;
+
+  const expected = Buffer.from(sign(userId));
+  const provided = Buffer.from(signature);
+  if (expected.length !== provided.length || !timingSafeEqual(expected, provided)) return null;
+
+  return userId;
+}
+```
+
+<Callout type="note" title="This is a minimal session on purpose">
+It keeps the passkey wiring legible. Use iron-session, Auth.js, Lucia or your
+own in a real app; passkify only needs to hand you a verified user.
+</Callout>
+
+### app/api/passkey/[...passkey]/route.ts
+
+```ts
+import { passkeys } from '@/lib/passkeys';
+import { createSession, readSession } from '@/lib/session';
+
+const handler = passkeys.handler({
+  // Must match this file's location: app/api/passkey/[...passkey] serves
+  // /api/passkey/*.
+  basePath: '/api/passkey',
+
+  getSessionUserId: (request) => readSession(request),
+
+  // Returning a HeadersInit merges into the default JSON reply.
+  onRegister: (_request, { user }) => ({ 'set-cookie': createSession(user.id) }),
+  onLogin:    (_request, { user }) => ({ 'set-cookie': createSession(user.id) }),
+});
+
+export { handler as GET, handler as POST, handler as PATCH, handler as DELETE };
+
+// Passkey ceremonies are stateful and must never be cached or prerendered.
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';   // the server half needs node:crypto
+```
+
+### app/signin/page.tsx
+
+```tsx
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import {
+  register, login, signInWithAutofill, configure, isSupported, PasskeyError,
+} from 'passkify/client';
+
+// Must match `basePath` in the route handler.
+configure({ baseUrl: '/api/passkey' });
+
+export default function SignInPage() {
+  const router = useRouter();
+  const [username, setUsername] = useState('');
+  const [status, setStatus] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!isSupported()) return;
+    const controller = new AbortController();
+
+    signInWithAutofill({ signal: controller.signal })
+      .then((result) => { if (result) router.push('/'); })
+      .catch(() => {});
+
+    // Aborting on unmount matters: a pending autofill request survives
+    // otherwise and blocks the next ceremony.
+    return () => controller.abort();
+  }, [router]);
+
+  const attempt = (action: () => Promise<unknown>) => async () => {
+    setBusy(true);
+    setStatus('');
+    try {
+      await action();
+      router.push('/');
+    } catch (error) {
+      if (error instanceof PasskeyError && error.isUserCancellation) setStatus('');
+      else setStatus(error instanceof Error ? error.message : 'Something went wrong.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!isSupported()) return <p>This browser does not support passkeys.</p>;
+
+  return (
+    <main>
+      <input
+        value={username}
+        onChange={(event) => setUsername(event.target.value)}
+        autoComplete="username webauthn"
+        placeholder="username"
+      />
+      <button disabled={busy} onClick={attempt(() => login())}>
+        Sign in with a passkey
+      </button>
+      <button disabled={busy || !username} onClick={attempt(() => register({ username }))}>
+        Create an account
+      </button>
+      {status && <p role="alert">{status}</p>}
+    </main>
+  );
+}
+```
+
+### .env.local
+
+```bash
+NEXT_PUBLIC_ORIGIN=http://localhost:3000
+SESSION_SECRET=replace-with-32-or-more-random-bytes
+```
+
+<Callout type="danger" title="MemoryStore does not work on serverless">
+A challenge issued by one instance is invisible to the next, so logins fail
+intermittently. Postgres for users and credentials plus Redis for challenges is
+a good split; see [store adapters](/docs/storage/adapters).
+</Callout>
+
+## Where to go next
+
+<Cards>
+  <Card href="/docs/storage/adapters" title="Replace the store">
+    Postgres, Prisma, Drizzle, Redis and MongoDB implementations.
+  </Card>
+  <Card href="/docs/guides/frameworks" title="Another framework">
+    Hono, SvelteKit, Remix, Bun, Deno and Cloudflare Workers.
+  </Card>
+  <Card href="/docs/server/credentials" title="A settings page">
+    List, rename and revoke passkeys.
+  </Card>
+  <Card href="/docs/guides/security" title="Before you ship">
+    The checklist, and what stays your responsibility.
+  </Card>
+</Cards>

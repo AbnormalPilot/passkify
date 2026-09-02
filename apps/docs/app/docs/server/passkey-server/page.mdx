@@ -1,0 +1,203 @@
+export const metadata = {
+  title: 'PasskeyServer',
+  description: 'The one object you construct, and every method it exposes.',
+};
+
+The one object you construct. Everything on the server side hangs off it.
+
+```js
+import { PasskeyServer, MemoryStore } from 'passkify';
+
+const passkeys = new PasskeyServer({
+  rpName: 'Acme',
+  origin: 'https://acme.com',
+  store: new MemoryStore(),
+});
+```
+
+Create it once, at module scope, and share it across requests. It holds no
+per-request state.
+
+<Callout type="note" title="In Next.js and other hot-reloading dev servers">
+Stash the instance on `globalThis` in development. Otherwise every file edit
+re-evaluates the module, and with `MemoryStore` that discards every in-flight
+challenge. The [examples page](/docs/examples#nextjs-app-router) shows the pattern.
+</Callout>
+
+## Constructor
+
+<ApiMethod
+  name="new PasskeyServer(config)"
+  signature="new PasskeyServer(config: PasskeyServerConfig)"
+  kind="constructor"
+>
+
+Validates the configuration eagerly and throws
+`PasskeyError('configuration_error')` if anything is wrong. Every option is
+documented on [configuration](/docs/server/configuration).
+
+<Reason title="Why configuration is validated at construction, not at first use">
+The two mistakes that account for almost every "passkeys don't work" report are
+an `rpID` that is not a registrable suffix of the page's origin, and an `origin`
+list missing the port the app is actually served on. Both are silent: they
+surface days later as an opaque `NotAllowedError` in somebody's browser with no
+stack trace pointing at the cause.
+
+Checking at construction turns both into a server that refuses to start with a
+message naming the fix. A crash on boot is a much cheaper failure than a login
+that mysteriously does not work.
+</Reason>
+
+<Throws>
+<Throw code="configuration_error">
+`rpName` or `store` missing, an `origin` that is not a bare scheme-host-port
+URL, a non-HTTPS origin that is not localhost, an `rpID` that is not valid for
+the given origins, or a `challengeSize` below 16.
+</Throw>
+</Throws>
+
+</ApiMethod>
+
+## Properties
+
+<ApiMethod name="rpID" signature="readonly rpID: string" kind="property">
+
+The Relying Party ID in force, after defaulting from `origin`.
+
+<Reason>
+Worth logging at boot. When a client reports `rpid_mismatch`, the first question
+is always "what does the server actually think the rpID is", and reading it back
+is faster than re-deriving it from config.
+</Reason>
+
+</ApiMethod>
+
+<ApiMethod name="store" signature="readonly store: PasskeyStore" kind="property">
+
+The store the server was constructed with. Handy in tests and for admin
+tooling that needs to reach credentials directly.
+
+</ApiMethod>
+
+## The four ceremony methods
+
+These are the whole API. Two to start a ceremony, two to finish one.
+
+<ApiMethod
+  name="startRegistration"
+  signature="startRegistration(input: StartRegistrationInput): Promise<StartRegistrationResult>"
+>
+
+Begins registering a passkey. Send the returned `options` to the browser
+verbatim. Covered in full on [registration](/docs/server/registration).
+
+```js
+// New account
+const { options } = await passkeys.startRegistration({ username: 'ada' });
+
+// Signed-in user adding another device
+const { options } = await passkeys.startRegistration({ userId: session.userId });
+```
+
+</ApiMethod>
+
+<ApiMethod
+  name="finishRegistration"
+  signature="finishRegistration(response: RegistrationResponseJSON): Promise<VerifyRegistrationResult>"
+>
+
+Verifies the browser's response and stores the credential. Throws on any
+failure. Full check list on [registration](/docs/server/registration).
+
+</ApiMethod>
+
+<ApiMethod
+  name="startAuthentication"
+  signature="startAuthentication(input?: StartAuthenticationInput): Promise<StartAuthenticationResult>"
+>
+
+Begins a login. Call it with no arguments for the usernameless flow, which is
+what you want. See [authentication](/docs/server/authentication).
+
+```js
+const { options } = await passkeys.startAuthentication();
+```
+
+</ApiMethod>
+
+<ApiMethod
+  name="finishAuthentication"
+  signature="finishAuthentication(response: AuthenticationResponseJSON): Promise<VerifyAuthenticationResult>"
+>
+
+Verifies an assertion. On success the returned `user` is authenticated and you
+should establish your session. See
+[authentication](/docs/server/authentication).
+
+</ApiMethod>
+
+<Callout type="warning" title="Both finish methods throw rather than returning verified: false">
+There is no falsy result to accidentally treat as success. Wrap them in
+`try`/`catch` and branch on
+[`error.code`](/docs/errors).
+</Callout>
+
+## Credential management
+
+Covered on [credential management](/docs/server/credentials).
+
+<ApiMethod
+  name="listCredentials"
+  signature="listCredentials(userId: string): Promise<PublicCredentialInfo[]>"
+/>
+
+<ApiMethod
+  name="renameCredential"
+  signature="renameCredential(userId: string, credentialId: string, nickname: string): Promise<void>"
+/>
+
+<ApiMethod
+  name="deleteCredential"
+  signature="deleteCredential(userId: string, credentialId: string): Promise<void>"
+/>
+
+## HTTP adapters
+
+Rather than writing the four routes yourself. Covered on
+[HTTP adapters](/docs/server/adapters).
+
+<ApiMethod
+  name="express"
+  signature="express(options?: ExpressAdapterOptions): (req, res, next) => Promise<void>"
+>
+
+Express and Connect middleware. Also works on a bare `node:http` server,
+because it parses its own JSON body when none has been parsed already.
+
+</ApiMethod>
+
+<ApiMethod
+  name="handler"
+  signature="handler(options?: FetchAdapterOptions): (request: Request) => Promise<Response>"
+>
+
+A standards `Request` to `Response` handler for Next.js App Router, Hono, Bun,
+Deno, Remix and Cloudflare Workers.
+
+</ApiMethod>
+
+<Reason title="Why two adapters and not a plugin system">
+These two shapes cover essentially every JavaScript server. Node-stream
+middleware is one; the fetch API is the other, and everything built in the last
+few years speaks it. A plugin architecture would be more surface area to
+maintain for frameworks that already fit one of these two.
+
+Both adapters are thin wrappers over the same internal dispatcher, so they
+cannot drift apart in behaviour. If neither fits, call the four ceremony methods
+directly. That is not a fallback; it is the actual API.
+</Reason>
+
+## Next
+
+- [Configuration](/docs/server/configuration) for every option.
+- [Registration](/docs/server/registration) and [authentication](/docs/server/authentication) in depth.

@@ -1,0 +1,496 @@
+export const metadata = {
+  title: 'Store adapters',
+  description: 'Working PasskeyStore implementations for Postgres, Prisma, Drizzle, Redis and MongoDB.',
+};
+
+Complete implementations. Copy one, adjust the table names, ship it.
+
+## SQL schema
+
+```sql
+CREATE TABLE passkey_users (
+  id           TEXT PRIMARY KEY,           -- the user handle, a UUID
+  username     TEXT NOT NULL UNIQUE,
+  display_name TEXT NOT NULL
+);
+
+-- Case-insensitive lookup, so "Ada" finds "ada".
+CREATE UNIQUE INDEX passkey_users_username_lower ON passkey_users (lower(username));
+
+CREATE TABLE passkey_credentials (
+  id           TEXT PRIMARY KEY,           -- base64url credential ID
+  user_id      TEXT NOT NULL REFERENCES passkey_users(id) ON DELETE CASCADE,
+  public_key   TEXT NOT NULL,              -- base64url COSE key
+  algorithm    INTEGER NOT NULL,
+  counter      BIGINT NOT NULL DEFAULT 0,
+  transports   TEXT[],
+  device_type  TEXT NOT NULL,
+  backed_up    BOOLEAN NOT NULL,
+  aaguid       TEXT NOT NULL,
+  nickname     TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_used_at TIMESTAMPTZ
+);
+
+CREATE INDEX passkey_credentials_user_id ON passkey_credentials (user_id);
+
+CREATE TABLE passkey_challenges (
+  challenge  TEXT PRIMARY KEY,
+  kind       TEXT NOT NULL,
+  user_id    TEXT,
+  expires_at TIMESTAMPTZ NOT NULL,
+  context    JSONB
+);
+
+CREATE INDEX passkey_challenges_expires_at ON passkey_challenges (expires_at);
+```
+
+<Reason title="Why ON DELETE CASCADE on credentials">
+When an account goes, its passkeys have to go with it. A stale credential row
+whose owner no longer exists will pass the signature check at login and then
+fail at `getUserById`, producing `unknown_user` on a credential that looks
+perfectly valid. Cascading avoids the class of bug entirely.
+</Reason>
+
+## Postgres
+
+```js
+import { Pool } from 'pg';
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+
+const toCredential = (row) => ({
+  id: row.id,
+  userId: row.user_id,
+  publicKey: row.public_key,
+  algorithm: row.algorithm,
+  counter: Number(row.counter),
+  transports: row.transports ?? undefined,
+  deviceType: row.device_type,
+  backedUp: row.backed_up,
+  aaguid: row.aaguid,
+  nickname: row.nickname ?? undefined,
+  createdAt: row.created_at,
+  lastUsedAt: row.last_used_at ?? undefined,
+});
+
+const toUser = (row) =>
+  row ? { id: row.id, username: row.username, displayName: row.display_name } : null;
+
+export const store = {
+  async getUserByUsername(username) {
+    const { rows } = await pool.query(
+      'SELECT * FROM passkey_users WHERE lower(username) = lower($1)',
+      [username],
+    );
+    return toUser(rows[0]);
+  },
+
+  async getUserById(id) {
+    const { rows } = await pool.query('SELECT * FROM passkey_users WHERE id = $1', [id]);
+    return toUser(rows[0]);
+  },
+
+  async createUser({ id, username, displayName }) {
+    // `id` comes from passkify and must be stored as-is.
+    const { rows } = await pool.query(
+      `INSERT INTO passkey_users (id, username, display_name)
+       VALUES ($1, $2, $3) RETURNING *`,
+      [id, username, displayName],
+    );
+    return toUser(rows[0]);
+  },
+
+  async createCredential(c) {
+    await pool.query(
+      `INSERT INTO passkey_credentials
+         (id, user_id, public_key, algorithm, counter, transports,
+          device_type, backed_up, aaguid, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [c.id, c.userId, c.publicKey, c.algorithm, c.counter, c.transports ?? null,
+       c.deviceType, c.backedUp, c.aaguid, c.createdAt],
+    );
+  },
+
+  async getCredentialById(id) {
+    const { rows } = await pool.query('SELECT * FROM passkey_credentials WHERE id = $1', [id]);
+    return rows[0] ? toCredential(rows[0]) : null;
+  },
+
+  async listCredentialsByUserId(userId) {
+    const { rows } = await pool.query(
+      'SELECT * FROM passkey_credentials WHERE user_id = $1 ORDER BY created_at',
+      [userId],
+    );
+    return rows.map(toCredential);
+  },
+
+  async updateCredential(id, changes) {
+    const columns = {
+      counter: 'counter', lastUsedAt: 'last_used_at',
+      backedUp: 'backed_up', nickname: 'nickname',
+    };
+    const sets = [];
+    const values = [];
+    for (const [key, column] of Object.entries(columns)) {
+      if (changes[key] !== undefined) {
+        values.push(changes[key]);
+        sets.push(`${column} = $${values.length}`);
+      }
+    }
+    if (sets.length === 0) return;
+    values.push(id);
+    await pool.query(
+      `UPDATE passkey_credentials SET ${sets.join(', ')} WHERE id = $${values.length}`,
+      values,
+    );
+  },
+
+  async deleteCredential(id) {
+    await pool.query('DELETE FROM passkey_credentials WHERE id = $1', [id]);
+  },
+
+  async saveChallenge(c) {
+    await pool.query(
+      `INSERT INTO passkey_challenges (challenge, kind, user_id, expires_at, context)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [c.challenge, c.kind, c.userId ?? null, c.expiresAt, c.context ?? null],
+    );
+  },
+
+  async takeChallenge(challenge) {
+    // Atomic fetch-and-delete: one challenge, one attempt.
+    const { rows } = await pool.query(
+      'DELETE FROM passkey_challenges WHERE challenge = $1 RETURNING *',
+      [challenge],
+    );
+    if (!rows[0] || rows[0].expires_at < new Date()) return null;
+    return {
+      challenge: rows[0].challenge,
+      kind: rows[0].kind,
+      userId: rows[0].user_id ?? undefined,
+      expiresAt: rows[0].expires_at,
+      context: rows[0].context ?? undefined,
+    };
+  },
+};
+```
+
+Sweep expired challenges on a schedule:
+
+```sql
+DELETE FROM passkey_challenges WHERE expires_at < now();
+```
+
+## Prisma
+
+```prisma
+model PasskeyUser {
+  id          String              @id
+  username    String              @unique
+  displayName String
+  credentials PasskeyCredential[]
+}
+
+model PasskeyCredential {
+  id         String      @id
+  userId     String
+  user       PasskeyUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  publicKey  String
+  algorithm  Int
+  counter    BigInt      @default(0)
+  transports String[]
+  deviceType String
+  backedUp   Boolean
+  aaguid     String
+  nickname   String?
+  createdAt  DateTime    @default(now())
+  lastUsedAt DateTime?
+
+  @@index([userId])
+}
+
+model PasskeyChallenge {
+  challenge String   @id
+  kind      String
+  userId    String?
+  expiresAt DateTime
+  context   Json?
+
+  @@index([expiresAt])
+}
+```
+
+```js
+import { PrismaClient } from '@prisma/client';
+const prisma = new PrismaClient();
+
+export const store = {
+  getUserByUsername: (username) => prisma.passkeyUser.findUnique({ where: { username } }),
+  getUserById: (id) => prisma.passkeyUser.findUnique({ where: { id } }),
+  createUser: ({ id, username, displayName }) =>
+    prisma.passkeyUser.create({ data: { id, username, displayName } }),
+
+  createCredential: async (c) => {
+    await prisma.passkeyCredential.create({ data: { ...c, counter: BigInt(c.counter) } });
+  },
+
+  getCredentialById: async (id) => {
+    const row = await prisma.passkeyCredential.findUnique({ where: { id } });
+    return row ? { ...row, counter: Number(row.counter) } : null;
+  },
+
+  listCredentialsByUserId: async (userId) => {
+    const rows = await prisma.passkeyCredential.findMany({
+      where: { userId }, orderBy: { createdAt: 'asc' },
+    });
+    return rows.map((row) => ({ ...row, counter: Number(row.counter) }));
+  },
+
+  updateCredential: async (id, changes) => {
+    await prisma.passkeyCredential.update({
+      where: { id },
+      data: {
+        ...changes,
+        ...(changes.counter !== undefined ? { counter: BigInt(changes.counter) } : {}),
+      },
+    });
+  },
+
+  deleteCredential: async (id) => {
+    await prisma.passkeyCredential.delete({ where: { id } }).catch(() => {});
+  },
+
+  saveChallenge: async (c) => {
+    await prisma.passkeyChallenge.create({ data: c });
+  },
+
+  takeChallenge: async (challenge) => {
+    // Prisma has no DELETE ... RETURNING, so an interactive transaction gives
+    // the same guarantee: a concurrent replay finds nothing.
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const row = await tx.passkeyChallenge.findUnique({ where: { challenge } });
+        if (!row) return null;
+        await tx.passkeyChallenge.delete({ where: { challenge } });
+        return row.expiresAt < new Date() ? null : row;
+      });
+    } catch {
+      return null;   // another transaction already consumed it
+    }
+  },
+};
+```
+
+<Callout type="warning" title="Prisma stores counter as BigInt">
+`PasskeyCredential.counter` is a plain `number` in passkify's types, so convert
+in both directions. Handing a `BigInt` back will make the counter comparison
+throw on mixed-type arithmetic.
+</Callout>
+
+## Drizzle
+
+```ts
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { pgTable, text, integer, boolean, timestamp, jsonb } from 'drizzle-orm/pg-core';
+import { eq, sql } from 'drizzle-orm';
+
+export const passkeyUsers = pgTable('passkey_users', {
+  id: text('id').primaryKey(),
+  username: text('username').notNull().unique(),
+  displayName: text('display_name').notNull(),
+});
+
+export const passkeyCredentials = pgTable('passkey_credentials', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  publicKey: text('public_key').notNull(),
+  algorithm: integer('algorithm').notNull(),
+  counter: integer('counter').notNull().default(0),
+  transports: text('transports').array(),
+  deviceType: text('device_type').notNull(),
+  backedUp: boolean('backed_up').notNull(),
+  aaguid: text('aaguid').notNull(),
+  nickname: text('nickname'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+});
+
+export const passkeyChallenges = pgTable('passkey_challenges', {
+  challenge: text('challenge').primaryKey(),
+  kind: text('kind').notNull(),
+  userId: text('user_id'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  context: jsonb('context'),
+});
+
+const db = drizzle(process.env.DATABASE_URL!);
+
+export const store = {
+  async getUserByUsername(username) {
+    const [row] = await db.select().from(passkeyUsers)
+      .where(sql`lower(${passkeyUsers.username}) = lower(${username})`);
+    return row ?? null;
+  },
+  async getUserById(id) {
+    const [row] = await db.select().from(passkeyUsers).where(eq(passkeyUsers.id, id));
+    return row ?? null;
+  },
+  async createUser(input) {
+    const [row] = await db.insert(passkeyUsers).values(input).returning();
+    return row;
+  },
+  async createCredential(credential) {
+    await db.insert(passkeyCredentials).values(credential);
+  },
+  async getCredentialById(id) {
+    const [row] = await db.select().from(passkeyCredentials)
+      .where(eq(passkeyCredentials.id, id));
+    return row ? { ...row, transports: row.transports ?? undefined } : null;
+  },
+  async listCredentialsByUserId(userId) {
+    return db.select().from(passkeyCredentials).where(eq(passkeyCredentials.userId, userId));
+  },
+  async updateCredential(id, changes) {
+    await db.update(passkeyCredentials).set(changes).where(eq(passkeyCredentials.id, id));
+  },
+  async deleteCredential(id) {
+    await db.delete(passkeyCredentials).where(eq(passkeyCredentials.id, id));
+  },
+  async saveChallenge(challenge) {
+    await db.insert(passkeyChallenges).values(challenge);
+  },
+  async takeChallenge(challenge) {
+    const [row] = await db.delete(passkeyChallenges)
+      .where(eq(passkeyChallenges.challenge, challenge)).returning();
+    if (!row || row.expiresAt < new Date()) return null;
+    return { ...row, userId: row.userId ?? undefined, context: row.context ?? undefined };
+  },
+};
+```
+
+## Redis, for challenges only
+
+Challenges are short-lived and high-churn, a good fit for Redis even when
+everything else lives in SQL. `GETDEL` gives exactly the atomic fetch-and-delete
+the contract asks for, and `EX` handles expiry for free.
+
+```js
+import { createClient } from 'redis';
+const redis = await createClient({ url: process.env.REDIS_URL }).connect();
+
+const challengeStore = {
+  async saveChallenge(challenge) {
+    const ttl = Math.max(1, Math.ceil((challenge.expiresAt.getTime() - Date.now()) / 1000));
+    await redis.set(
+      `passkey:challenge:${challenge.challenge}`,
+      JSON.stringify(challenge),
+      { EX: ttl },
+    );
+  },
+
+  async takeChallenge(challenge) {
+    // GETDEL is atomic: two concurrent replays cannot both win.
+    const raw = await redis.getDel(`passkey:challenge:${challenge}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    parsed.expiresAt = new Date(parsed.expiresAt);
+    return parsed.expiresAt < new Date() ? null : parsed;
+  },
+};
+
+// Mix into the SQL store.
+export const store = { ...postgresStore, ...challengeStore };
+```
+
+<Reason title="Why this split is a good default">
+Users and credentials are long-lived relational data that belongs with the rest
+of your account tables. Challenges are ephemeral, written once and deleted
+seconds later, and every one of them is a row you would otherwise have to sweep.
+
+Splitting them puts each kind of data where it costs least, and it happens to
+give you the strongest replay guarantee available, since `GETDEL` is a single
+round trip with no window.
+</Reason>
+
+## MongoDB
+
+A TTL index expires challenges automatically, and `findOneAndDelete` is atomic.
+
+```js
+import { MongoClient } from 'mongodb';
+
+const db = (await new MongoClient(process.env.MONGO_URL).connect()).db();
+const users = db.collection('passkey_users');
+const credentials = db.collection('passkey_credentials');
+const challenges = db.collection('passkey_challenges');
+
+await users.createIndex({ username: 1 }, {
+  unique: true, collation: { locale: 'en', strength: 2 },
+});
+await credentials.createIndex({ userId: 1 });
+await challenges.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
+const strip = (doc) => (doc ? (({ _id, ...rest }) => rest)(doc) : null);
+
+export const store = {
+  getUserByUsername: (username) =>
+    users.findOne({ username }, { collation: { locale: 'en', strength: 2 } }).then(strip),
+  getUserById: (id) => users.findOne({ id }).then(strip),
+  createUser: async (input) => {
+    await users.insertOne({ ...input });
+    return input;
+  },
+  createCredential: async (c) => { await credentials.insertOne({ ...c }); },
+  getCredentialById: (id) => credentials.findOne({ id }).then(strip),
+  listCredentialsByUserId: (userId) =>
+    credentials.find({ userId }).sort({ createdAt: 1 }).toArray()
+      .then((rows) => rows.map(strip)),
+  updateCredential: async (id, changes) => { await credentials.updateOne({ id }, { $set: changes }); },
+  deleteCredential: async (id) => { await credentials.deleteOne({ id }); },
+  saveChallenge: async (c) => { await challenges.insertOne({ ...c }); },
+  takeChallenge: async (challenge) => {
+    const doc = strip(await challenges.findOneAndDelete({ challenge }));
+    if (!doc || doc.expiresAt < new Date()) return null;
+    return doc;
+  },
+};
+```
+
+## Using your existing users table
+
+You do not need passkify's user shape. Map yours onto it.
+
+```js
+export const store = {
+  ...credentialAndChallengeMethods,
+
+  async getUserByUsername(username) {
+    const row = await db.user.findByEmail(username);
+    return row && { id: row.passkeyHandle, username: row.email, displayName: row.name };
+  },
+
+  async getUserById(handle) {
+    const row = await db.user.findByPasskeyHandle(handle);
+    return row && { id: row.passkeyHandle, username: row.email, displayName: row.name };
+  },
+
+  async createUser({ id, username, displayName }) {
+    // Only reached when somebody signs up passkey-first.
+    const row = await db.user.create({ email: username, name: displayName, passkeyHandle: id });
+    return { id: row.passkeyHandle, username: row.email, displayName: row.name };
+  },
+};
+```
+
+<Reason title="Why add a passkey_handle column instead of reusing your primary key">
+Two reasons.
+
+Your primary key is often an auto-increment integer, which is enumerable and
+leaks how many users you have to anyone who reads their own handle. User handles
+are visible in the user's password manager, so that is a real disclosure.
+
+And the handle has to stay fixed forever. A separate column survives re-keying
+your users table, changing ORMs, or merging accounts; a primary key does not
+always.
+</Reason>

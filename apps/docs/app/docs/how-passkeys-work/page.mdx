@@ -1,0 +1,200 @@
+export const metadata = {
+  title: 'How passkeys work',
+  description: 'Relying Party ID, challenges, user handles, and discoverable credentials.',
+};
+
+Enough of the model to debug your own integration. Ten minutes here saves an
+hour of guessing at `rpID`.
+
+## The one-paragraph version
+
+A passkey is a key pair. The private half never leaves the user's device, or
+their iCloud or Google keychain. Your server stores the public half. Signing in
+means your server sends a random challenge, the device signs it, and you verify
+the signature. There is no shared secret, so there is nothing in your database
+worth stealing and nothing for a phishing page to capture.
+
+## The two ceremonies
+
+Both are two round trips, and both are the same shape: you issue a challenge,
+the device signs something, you verify.
+
+```
+REGISTRATION                                  AUTHENTICATION
+
+browser          server                       browser          server
+   |  register/start  |                          |  login/start   |
+   |----------------->|  challenge + rp info     |--------------->|  challenge
+   |<-----------------|                          |<---------------|
+   |                                             |
+   [ device creates a key pair,                  [ device signs the challenge
+     signs, shows Touch ID ]                       with the stored private key ]
+   |                                             |
+   |  register/finish |                          |  login/finish  |
+   |----------------->|  verify + store pubkey   |--------------->|  verify signature
+   |<-----------------|                          |<---------------|
+```
+
+## The three terms that matter
+
+<ApiMethod name="Relying Party ID" kind="concept">
+
+The domain a passkey is bound to. A credential created for `example.com` cannot
+be used on `evil.com`.
+
+<Reason title="Why this is the whole security story">
+The browser enforces the binding, not your code and not the user's judgement. A
+pixel-perfect replica at `example.com.evil.net` cannot obtain a signature for
+`example.com`, because the browser will not ask the authenticator for one. This
+is why passkeys are unphishable in a way that one-time codes are not, and why
+`rpID` is the one setting you must get right.
+</Reason>
+
+The rule is that `rpID` must be the page's host or a parent domain of it:
+
+| Page served from | Valid `rpID` | Invalid |
+| --- | --- | --- |
+| `https://example.com` | `example.com` | `app.example.com`, `www.example.com` |
+| `https://app.example.com` | `app.example.com`, `example.com` | `other.example.com` |
+| `http://localhost:3000` | `localhost` | `127.0.0.1` |
+
+<Callout type="danger" title="You cannot change rpID later">
+Every credential is permanently bound to the `rpID` it was created under.
+Changing it orphans every passkey your users have registered, and they will all
+have to enrol again. If you might ever want one passkey to work across
+subdomains, set it to your apex domain **now**.
+</Callout>
+
+</ApiMethod>
+
+<ApiMethod name="Challenge" kind="concept">
+
+Random bytes you generate, store, and send to the browser. The device signs
+them, and you check the signature is over the bytes you issued.
+
+<Reason>
+This is what makes each ceremony fresh. Without a server-issued challenge, a
+captured response would work forever. passkify uses 32 random bytes by default,
+stores each one exactly once, and deletes it on read, so a replay of a captured
+response finds nothing to match against.
+</Reason>
+
+Challenges expire after five minutes by default. That window covers a slow user
+finding their phone without leaving a useful replay surface.
+
+</ApiMethod>
+
+<ApiMethod name="User handle" kind="concept">
+
+An opaque identifier for the account, stored on the user's device alongside the
+credential. On a usernameless login the device sends it back, which is how your
+server knows which account just signed in.
+
+<Reason title="Why it must not be an email address">
+User handles are stored in the clear on the authenticator and are visible in the
+user's password manager. They are also permanent: change the handle and every
+existing passkey for that account is orphaned. Use a UUID. passkify generates
+one for you and asks your store to persist it verbatim.
+</Reason>
+
+Hard limit: 64 bytes once UTF-8 encoded. passkify checks this before the browser
+prompt appears rather than letting it fail opaquely.
+
+</ApiMethod>
+
+## Discoverable credentials
+
+This is what makes `login()` work with no username.
+
+<Contrast>
+<ContrastItem tone="good" title="Discoverable (resident key)">
+
+The authenticator stores the credential **and** the user handle. The browser can
+list every passkey for your domain, so it shows a picker and you learn who
+signed in from the response.
+
+```js
+await login();   // no argument
+```
+
+</ContrastItem>
+<ContrastItem tone="bad" title="Non-discoverable">
+
+The authenticator stores only a key derived from an ID you supply. You must
+already know which credentials to offer, which means asking for a username
+first.
+
+```js
+await login({ username });
+```
+
+</ContrastItem>
+</Contrast>
+
+passkify defaults to `residentKey: 'preferred'` and supports both flows.
+
+<Reason title="Why 'preferred' and not 'required'">
+`'required'` guarantees usernameless login but will fail outright on
+authenticators with limited storage, which includes a lot of older hardware
+security keys. `'preferred'` gets you a discoverable credential everywhere it is
+possible and quietly falls back everywhere it is not, so nobody is locked out.
+Set it to `'required'` only if you are willing to turn those users away.
+</Reason>
+
+## User presence and user verification
+
+Two different flags in every response, often confused.
+
+<PropList>
+  <Prop name="User Present (UP)" type="always required">
+    Somebody physically interacted with the authenticator: a touch, a tap, a
+    button press. It proves a human is there. It does not prove which human.
+  </Prop>
+  <Prop name="User Verified (UV)" type="configurable">
+    The authenticator checked *who* it was: a PIN, a fingerprint, a face. This
+    is what makes a passkey two factors in one gesture, something you have plus
+    something you are.
+  </Prop>
+</PropList>
+
+passkify always requires UP. UV is governed by
+[`userVerification`](/docs/server/configuration#userverification), which defaults
+to `'preferred'`.
+
+## Synced versus device-bound
+
+Every registration reports whether the credential can leave the device it was
+made on.
+
+<PropList>
+  <Prop name="multiDevice" type="backup eligible">
+    A syncing passkey. It lives in iCloud Keychain, Google Password Manager,
+    1Password or similar, and survives the loss of any one device. Most consumer
+    passkeys are this.
+  </Prop>
+  <Prop name="singleDevice" type="not backup eligible">
+    Bound to one authenticator, typically a hardware security key. Losing the
+    device loses the credential, which matters for your recovery planning.
+  </Prop>
+</PropList>
+
+passkify records this on every credential as `deviceType`, so an account
+settings page can warn a user whose only passkey is device-bound. See
+[credential management](/docs/server/credentials).
+
+## Attestation, and why you should ignore it
+
+Attestation answers "what kind of authenticator made this key?". For consumer
+passkeys the answer is deliberately nothing: Apple, Google and 1Password return
+`fmt: "none"` with an all-zero AAGUID, because a per-model identifier is a
+tracking vector.
+
+passkify verifies any statement that arrives, never requires one, and defaults
+to `attestation: 'none'`. The full reasoning is in
+[the security guide](/docs/guides/security#attestation).
+
+## Next
+
+- [Quickstart](/docs/quickstart) to build the thing.
+- [PasskeyServer](/docs/server/passkey-server) for the API surface.
+- [Security model](/docs/guides/security) for every check that runs.

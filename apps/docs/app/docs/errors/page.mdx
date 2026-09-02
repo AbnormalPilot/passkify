@@ -1,0 +1,240 @@
+export const metadata = {
+  title: 'Errors',
+  description: 'Every PasskeyError code, what causes it, and what to do about it.',
+};
+
+Everything thrown on either side of the wire is a `PasskeyError` carrying a
+stable machine-readable `code`.
+
+```js
+import { PasskeyError, isPasskeyError } from 'passkify';         // server
+import { PasskeyError, isPasskeyError } from 'passkify/client';  // browser
+```
+
+<Reason title="Why codes rather than message matching">
+Messages are written for the developer reading a console and get reworded as
+the docs improve. Codes are API: they do not change without a major version, so
+`error.code === 'cancelled'` keeps working across upgrades in a way that a
+substring match on the message never could.
+</Reason>
+
+## The class
+
+<ApiMethod name="PasskeyError" kind="class" signature="class PasskeyError extends Error">
+
+<PropList>
+  <Prop name="code" type="PasskeyErrorCode" required>
+    The stable identifier. Branch on this.
+  </Prop>
+  <Prop name="status" type="number">
+    Suggested HTTP status when this surfaces from a route handler. The mounted
+    adapters use it automatically.
+  </Prop>
+  <Prop name="cause" type="unknown">
+    The underlying error, when there was one. A `DOMException` from the browser,
+    or an OpenSSL failure from a key import.
+  </Prop>
+  <Prop name="isUserCancellation" type="boolean (getter)">
+    True when the visitor simply dismissed the prompt. Almost always the right
+    thing to check first in a `catch`.
+  </Prop>
+  <Prop name="toJSON()" type="() => { error, message }">
+    The wire shape the adapters send.
+  </Prop>
+</PropList>
+
+</ApiMethod>
+
+```js
+try {
+  await login();
+} catch (error) {
+  if (!isPasskeyError(error)) throw error;
+
+  if (error.isUserCancellation) return;              // not worth surfacing
+  if (error.code === 'unknown_credential') return showSignUpPrompt();
+
+  showMessage(error.message);
+}
+```
+
+## Browser codes
+
+Thrown by `passkify/client`.
+
+<ApiMethod name="unsupported" kind="code">
+
+No WebAuthn in this browser or context.
+
+**Do:** feature-detect with `isSupported()` before rendering a passkey button,
+and keep another way to sign in for the browsers that fail it.
+
+</ApiMethod>
+
+<ApiMethod name="cancelled" kind="code">
+
+The prompt was dismissed, timed out, or was superseded by another ceremony.
+
+**Do:** nothing. This is the most common outcome after a successful login, and
+showing an error for it trains users to ignore your errors.
+
+<Callout type="note" title="This also covers 'no matching passkey'">
+The browser refuses to distinguish, on purpose: a precise answer would let a
+page probe which credentials a visitor holds. If you need to guide a user who
+has no passkey, offer a sign-up path alongside the sign-in button rather than
+inferring it from the error.
+</Callout>
+
+</ApiMethod>
+
+<ApiMethod name="already_registered" kind="code">
+
+The authenticator already holds a passkey for this account and declined to
+create a duplicate. Raised from `InvalidStateError`.
+
+**Do:** show "this device already has a passkey for your account". This is
+information, not a failure, and it means `excludeCredentials` did its job.
+
+</ApiMethod>
+
+<ApiMethod name="insecure_context" kind="code">
+
+Not a secure origin, or `rpID` does not match the page's domain.
+
+**Do:** check you are on HTTPS or `localhost`, then check `rpID` against
+[the table](/docs/how-passkeys-work#relying-party-id). This is the error you
+get from an `rpID` typo.
+
+</ApiMethod>
+
+<ApiMethod name="not_allowed" kind="code">
+
+The authenticator refused for a reason it will not specify. Usually a policy
+mismatch: user verification was required and unavailable, or a discoverable
+credential was required and there was no room.
+
+</ApiMethod>
+
+<ApiMethod name="server_error" kind="code">
+
+Your own endpoint was unreachable, returned a non-2xx without a JSON body, or
+returned something unparseable.
+
+**Do:** check `baseUrl` matches the adapter's `basePath`. A mismatch is the
+usual cause and the fetch handler's 404 body says so explicitly.
+
+</ApiMethod>
+
+## Server codes
+
+Thrown by `passkify/server`. The status column is what the adapters send.
+
+| Code | Status | Cause |
+| --- | --- | --- |
+| `malformed_response` | 400 | Not a ceremony response, or a required field is missing |
+| `parse_error` | 400 | Bad CBOR, truncated authenticator data, invalid UTF-8 |
+| `challenge_not_found` | 401 | Expired, already used, or issued by another process |
+| `challenge_mismatch` | 401 | The signed challenge is not the one issued |
+| `origin_mismatch` | 401 | Origin not in the allow-list, or a cross-origin frame |
+| `type_mismatch` | 401 | Login response sent to registration, or the reverse |
+| `rpid_mismatch` | 401 | Signed for a different Relying Party ID |
+| `user_not_present` | 401 | The user-present flag was not set |
+| `user_not_verified` | 401 | Verification required, only presence performed |
+| `bad_signature` | 401 | The signature did not verify |
+| `counter_regression` | 401 | Counter went backwards, possible cloned authenticator |
+| `unsupported_algorithm` | 401 | Key algorithm not offered, or not verifiable |
+| `attestation_failed` | 401 | Attestation statement present but inconsistent |
+| `unknown_credential` | 404 | Not registered, or not for this account |
+| `unknown_user` | 404 | No such account, or no session on a protected route |
+| `credential_exists` | 409 | Already registered, or the username is taken |
+| `last_credential` | 409 | Refusing to remove an account's only passkey |
+| `unsupported_feature` | 500 | Valid but unimplemented, such as an exotic attestation format |
+| `configuration_error` | 500 | passkify is misconfigured |
+
+### The ones you will actually hit
+
+<ApiMethod name="challenge_not_found" kind="code">
+
+No pending ceremony matches this response.
+
+**Three causes, in order of likelihood:**
+
+1. **Multiple workers with `MemoryStore`.** Worker A issued the challenge,
+   worker B received the response. Move challenges to shared storage. This is
+   the answer roughly every time the failure is intermittent in production and
+   absent locally.
+2. **The response was replayed.** Working as intended.
+3. **The user took longer than `challengeTimeout`.** Raise it if your flow
+   involves a cross-device scan.
+
+</ApiMethod>
+
+<ApiMethod name="origin_mismatch" kind="code">
+
+The browser reported an origin not in your allow-list, or the ceremony ran
+inside a cross-origin frame.
+
+**Do:** compare the origin in the message against your `origin` config,
+character for character. `https://example.com` and `https://www.example.com`
+are different origins, and so are `http://localhost:3000` and
+`http://localhost`.
+
+Behind a proxy, the browser reports the public origin, not the internal one
+your app binds to.
+
+</ApiMethod>
+
+<ApiMethod name="rpid_mismatch" kind="code">
+
+The authenticator signed for a different Relying Party ID.
+
+**Do:** if this appears at login for a credential that used to work, your
+`rpID` changed. There is no migration; those credentials are orphaned. If it
+appears at registration, the configured `rpID` is not valid for the page's
+origin, and the constructor would normally have caught that, so check the page
+is served from the origin you configured.
+
+</ApiMethod>
+
+<ApiMethod name="last_credential" kind="code">
+
+Refusing to remove an account's only passkey, which would lock the user out.
+
+**Do:** tell the user to register a replacement first. This is a conflict with
+the account's state rather than a fault, so it is a 409 and belongs in the UI,
+not in your error log.
+
+If your app has another way in, and being left with zero passkeys is fine, call
+`store.deleteCredential(id)` directly. The guard lives in the server method, not
+the store.
+
+</ApiMethod>
+
+<ApiMethod name="configuration_error" kind="code">
+
+passkify is set up wrong, and the message names the fix. Raised at construction
+for a bad `rpID` or `origin`, and at runtime for a user handle over 64 bytes.
+
+</ApiMethod>
+
+## Mapping to your API
+
+The adapters do this for you. Doing it by hand:
+
+```js
+import { isPasskeyError } from 'passkify';
+
+app.use((error, req, res, next) => {
+  if (!isPasskeyError(error)) return next(error);
+
+  // 5xx means passkify itself broke; let it reach your logs.
+  if (error.status >= 500) return next(error);
+
+  res.status(error.status).json(error.toJSON());
+});
+```
+
+<Callout type="warning" title="Do not echo the message to end users">
+The messages are written for developers and name internal specifics such as the
+configured `rpID`. Log them; show the user something calmer, keyed off `code`.
+</Callout>
