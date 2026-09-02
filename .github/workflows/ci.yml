@@ -13,11 +13,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
       - run: npm ci
+      # The test files import the compiled output, so dist/ has to exist before
+      # anything type-checks it. `npm test` would build it, but that runs after.
+      - run: npm run build -w passkify
       - run: npm run typecheck -w passkify
-      # `test` builds dist/ first, so this also proves the published output compiles.
+      # `test` rebuilds dist/, so this also proves the published output compiles.
       - run: npm test -w passkify
 
   docs:
@@ -27,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
       - run: npm ci
       - run: npm run verify -w passkify-docs

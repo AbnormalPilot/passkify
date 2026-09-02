@@ -15,14 +15,14 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/USER/passkify.git",
+    "url": "git+https://github.com/AbnormalPilot/passkify.git",
     "directory": "packages/passkify"
   },
   "homepage": "https://passkify.himanshubuilds.in",
   "bugs": {
-    "url": "https://github.com/USER/passkify/issues"
+    "url": "https://github.com/AbnormalPilot/passkify/issues"
   },
-  "author": "",
+  "author": "Himanshu Dubey (https://github.com/AbnormalPilot)",
   "type": "module",
   "sideEffects": false,
   "engines": {
@@ -59,7 +59,7 @@
     "test": "npm run build && node --test test/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "build": "node scripts/build.mjs",
-    "prepublishOnly": "npm run typecheck && npm test",
+    "prepublishOnly": "npm run build && npm run typecheck && npm test",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "devDependencies": {
