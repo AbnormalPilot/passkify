@@ -71,9 +71,13 @@ test('parses the same fields node:crypto does, for an EC certificate', () => {
     assert.equal(ours.notAfter.toISOString(), new Date(theirs.validTo).toISOString());
     assert.equal(ours.publicKey.algorithm, 'EC');
     assert.equal(ours.publicKey.curve, 'P-256');
-    // openssl emits v1 when there are no extensions to carry.
-    assert.equal(ours.version, 1);
-    assert.equal(ours.extensions.length, 0);
+    // X.509 ties these two together: a certificate carrying extensions is v3,
+    // one without them is v1. Which of the two comes out here is a property of
+    // the openssl that built the fixture, not of the parser — OpenSSL 3.x adds
+    // subject and authority key identifiers to a self-signed certificate by
+    // default, LibreSSL does not — so assert the rule rather than whichever
+    // habit the local build has.
+    assert.equal(ours.version, ours.extensions.length > 0 ? 3 : 1);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
