@@ -11,9 +11,19 @@
  */
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
+
+/**
+ * A built module, addressed as a URL.
+ *
+ * `import()` of an absolute Windows path throws — `D:\...` reads as a URL
+ * scheme — so the path has to go through `pathToFileURL` first. This is what
+ * broke the Windows row of the matrix, and only in dist mode, because that is
+ * the only time the build runs there.
+ */
+const built = (file) => pathToFileURL(join(root, file)).href;
 const repoRoot = dirname(dirname(root));
 
 /** Pull `code` + JSDoc out of the PasskeyErrorCode union, in source order. */
@@ -46,12 +56,12 @@ function readErrorCodes() {
 
 /** The HTTP status each code maps to, read from the compiled module. */
 async function readStatuses(codes) {
-  const { PasskeyError } = await import(join(root, 'dist/esm/shared/errors.js'));
+  const { PasskeyError } = await import(built('dist/esm/shared/errors.js'));
   return Object.fromEntries(codes.map(({ code }) => [code, new PasskeyError(code, '').status]));
 }
 
 async function readChecks() {
-  const { VERIFICATION_CHECKS } = await import(join(root, 'dist/esm/shared/checks.js'));
+  const { VERIFICATION_CHECKS } = await import(built('dist/esm/shared/checks.js'));
   return VERIFICATION_CHECKS;
 }
 
