@@ -33,11 +33,18 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 
 rmSync('dist', { recursive: true, force: true });
 
+// Resolved and run with this Node rather than shelled out to `npx`. On Windows
+// the executable is `npx.cmd`, which `execFileSync` will not find without a
+// shell — the build died there with `spawnSync npx ENOENT` — and going
+// straight to the compiler skips a process and a PATH lookup everywhere else.
+const tsc = createRequire(import.meta.url).resolve('typescript/bin/tsc');
+
 for (const project of ['tsconfig.esm.json', 'tsconfig.cjs.json']) {
-  execFileSync('npx', ['tsc', '-p', project], { stdio: 'inherit' });
+  execFileSync(process.execPath, [tsc, '-p', project], { stdio: 'inherit' });
 }
 
 /** Every file under `dir`, recursively. */
