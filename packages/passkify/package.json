@@ -240,7 +240,7 @@
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:dist": "npm run build && PASSKIFY_TEST_TARGET=dist vitest run",
+    "test:dist": "npm run build && vitest run --mode dist",
     "generate": "node scripts/generate.mjs"
   },
   "devDependencies": {
