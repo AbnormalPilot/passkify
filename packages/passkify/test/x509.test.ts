@@ -6,7 +6,7 @@
 
 import { X509Certificate } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
@@ -194,5 +194,115 @@ test('PEM with or without headers, and raw DER, all parse to the same certificat
     assert.equal(Certificate.from(fromPem.der).subject, fromPem.subject);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Issue a certificate signed by another, so a real chain can be built.
+ *
+ * `chainIsTrusted` walking more than one link is the part that matters for
+ * attestation roots — a manufacturer's batch certificate is signed by an
+ * intermediate, not by the root you pinned — and a single self-signed
+ * certificate never exercises it.
+ */
+function issuedBy(
+  issuer: { pem: string; keyPem: string; dir: string },
+  options: { subject: string; ca?: boolean },
+): { pem: string; keyPem: string; dir: string } {
+  const dir = mkdtempSync(join(tmpdir(), 'passkify-x509-'));
+  const keyPath = join(dir, 'key.pem');
+  const csrPath = join(dir, 'req.csr');
+  const certPath = join(dir, 'cert.pem');
+  const issuerCert = join(dir, 'issuer.pem');
+  const issuerKey = join(dir, 'issuer-key.pem');
+  const extPath = join(dir, 'ext.cnf');
+
+  writeFileSync(issuerCert, issuer.pem);
+  writeFileSync(issuerKey, issuer.keyPem);
+  writeFileSync(extPath, `basicConstraints=critical,CA:${options.ca ? 'TRUE' : 'FALSE'}\n`);
+
+  execFileSync(
+    'openssl',
+    ['ecparam', '-name', 'prime256v1', '-genkey', '-noout', '-out', keyPath],
+    {
+      stdio: 'pipe',
+    },
+  );
+  execFileSync(
+    'openssl',
+    ['req', '-new', '-key', keyPath, '-subj', options.subject, '-out', csrPath],
+    { stdio: 'pipe' },
+  );
+  execFileSync(
+    'openssl',
+    [
+      'x509',
+      '-req',
+      '-in',
+      csrPath,
+      '-CA',
+      issuerCert,
+      '-CAkey',
+      issuerKey,
+      '-CAcreateserial',
+      '-days',
+      '365',
+      '-sha256',
+      '-extfile',
+      extPath,
+      '-out',
+      certPath,
+    ],
+    { stdio: 'pipe' },
+  );
+
+  return { pem: readFileSync(certPath, 'utf8'), keyPem: readFileSync(keyPath, 'utf8'), dir };
+}
+
+test('a leaf, an intermediate and a root validate as one chain', async () => {
+  const root = selfSigned({ subject: '/CN=root', ca: true });
+  const intermediate = issuedBy(root, { subject: '/CN=intermediate', ca: true });
+  const leaf = issuedBy(intermediate, { subject: '/CN=leaf' });
+  try {
+    const chain = [Certificate.from(leaf.pem), Certificate.from(intermediate.pem)];
+    const roots = [Certificate.from(root.pem)];
+
+    assert.equal(await chainIsTrusted(chain, roots), true);
+    // The leaf alone does not reach the root: the intermediate is load-bearing.
+    assert.equal(await chainIsTrusted([chain[0]], roots), false);
+    // And order matters — a chain is leaf-first, not root-first.
+    assert.equal(await chainIsTrusted([...chain].reverse(), roots), false);
+  } finally {
+    for (const { dir } of [root, intermediate, leaf]) rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an intermediate that is not a CA breaks the chain', async () => {
+  const root = selfSigned({ subject: '/CN=root', ca: true });
+  // Signed by the root, but CA:FALSE — so it must not be allowed to issue.
+  const notACA = issuedBy(root, { subject: '/CN=not-a-ca' });
+  const leaf = issuedBy(notACA, { subject: '/CN=leaf' });
+  try {
+    const trusted = await chainIsTrusted(
+      [Certificate.from(leaf.pem), Certificate.from(notACA.pem)],
+      [Certificate.from(root.pem)],
+    );
+    assert.equal(trusted, false);
+  } finally {
+    for (const { dir } of [root, notACA, leaf]) rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a chain whose root is not among the supplied roots is not trusted', async () => {
+  const root = selfSigned({ subject: '/CN=root', ca: true });
+  const other = selfSigned({ subject: '/CN=someone else', ca: true });
+  const leaf = issuedBy(root, { subject: '/CN=leaf' });
+  try {
+    assert.equal(
+      await chainIsTrusted([Certificate.from(leaf.pem)], [Certificate.from(other.pem)]),
+      false,
+    );
+  } finally {
+    for (const { dir } of [root, other, leaf]) rmSync(dir, { recursive: true, force: true });
   }
 });
