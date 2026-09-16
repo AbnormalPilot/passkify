@@ -24,7 +24,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with: { node-version: 24, cache: npm }
       - run: npm ci
       - run: npx biome ci .
@@ -45,7 +45,7 @@ jobs:
           - { node: '24', os: windows-latest }
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with: { node-version: '${{ matrix.node }}', cache: npm }
       # `engine-strict` is on in .npmrc, and the only `engines` fields in this
       # tree belong to dev tooling — the library has zero runtime dependencies,
@@ -79,7 +79,7 @@ jobs:
         runtime: [bun]
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with: { node-version: 24, cache: npm }
       - run: npm ci
       - run: npm run build -w passkify
@@ -97,7 +97,7 @@ jobs:
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with: { node-version: 24, cache: npm }
       - run: npm ci
       - run: npm run build -w passkify
@@ -138,7 +138,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with: { node-version: 24, cache: npm }
       - run: npm ci
       - run: npm run test:coverage -w passkify
@@ -154,7 +154,7 @@ jobs:
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with: { node-version: 24, cache: npm }
       - run: npm ci
       - run: npm run verify -w passkify-docs
