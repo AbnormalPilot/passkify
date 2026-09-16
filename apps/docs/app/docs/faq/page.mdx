@@ -177,9 +177,13 @@ migration. See
 
 <ApiMethod name="How much does this add to my bundle?" kind="question">
 
-About 6.5 kB gzipped for `passkify/client`. The server half never reaches the
-browser, and importing it from browser code fails at build time rather than
-shipping something broken.
+About 3.6 kB gzipped for `passkify/client` — 10.3 kB before compression. The
+figure on the [home page](/) is measured from source on every docs build rather
+than typed in here.
+
+Import the subpath, not the package root. The root is the server half, and
+since verification moved to WebCrypto it bundles for a browser without erroring
+— so importing it costs you about six times the size and nothing warns you.
 
 </ApiMethod>
 

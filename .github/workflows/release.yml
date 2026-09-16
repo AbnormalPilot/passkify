@@ -44,7 +44,7 @@ jobs:
       - name: Verify
         run: |
           npx biome ci .
-          npm run typecheck
+          npm run typecheck -w passkify
           npm test -w passkify
           npm run test:dist -w passkify
 

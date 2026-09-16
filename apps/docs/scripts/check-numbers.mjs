@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs';
 
 const stats = JSON.parse(readFileSync('lib/generated/stats.json', 'utf8'));
 const { registration, authentication } = stats.checks;
+const kb = (bytes) => (bytes / 1024).toFixed(1);
 
 const WORDS = [
   'zero',
@@ -65,8 +66,17 @@ const claims = [
     file: 'app/docs/page.mdx',
     text: `${capitalise(word(authentication))} separate checks have to pass`,
   },
+  // The bundle size, for the one page that quotes it in a sentence. The home
+  // page renders the same figure straight from stats.json.
+  {
+    file: 'app/docs/faq/page.mdx',
+    text: `About ${kb(stats.client.gzippedBytes)} kB gzipped for \`passkify/client\` — ${kb(
+      stats.client.minifiedBytes,
+    )} kB before compression.`,
+  },
 ];
 
+// The word "counts" undersells it now; these are the derived figures generally.
 const problems = [];
 for (const { file, text } of claims) {
   if (!readFileSync(file, 'utf8').includes(text)) {
@@ -95,6 +105,6 @@ if (problems.length > 0) {
   process.exit(1);
 }
 console.log(
-  `${claims.length} prose counts agree with the registry ` +
+  `${claims.length} prose figures agree with the library ` +
     `(${registration} registration, ${authentication} authentication)`,
 );

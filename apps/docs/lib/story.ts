@@ -129,7 +129,7 @@ export interface Support {
  * links to the code that makes the claim true is a reference.
  */
 export const RUNTIMES: Support[] = [
-  { slug: 'nodedotjs', name: 'Node 18+', href: '/docs/guides/frameworks#no-framework-at-all' },
+  { slug: 'nodedotjs', name: 'Node 20+', href: '/docs/guides/frameworks#no-framework-at-all' },
   { slug: 'express', name: 'Express', href: '/docs/server/adapters#express' },
   { slug: 'fastify', name: 'Fastify', href: '/docs/guides/frameworks#express-connect-fastify' },
   { slug: 'nextdotjs', name: 'Next.js', href: '/docs/guides/frameworks#nextjs-app-router' },

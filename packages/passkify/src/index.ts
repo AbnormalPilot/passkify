@@ -11,9 +11,11 @@
  * import { register, login } from 'passkify/client';            // browser
  * ```
  *
- * Importing this module from browser code will fail — it pulls in
- * `node:crypto`. That is deliberate: it fails at build time rather than
- * shipping a broken bundle.
+ * Import `passkify/client` in browser code, not this module. It used to be
+ * impossible to get wrong — the root pulled in `node:crypto` and a browser
+ * build died on it. Since verification moved to WebCrypto the root bundles
+ * perfectly happily, at roughly six times the size of the client half, so the
+ * mistake now ships instead of failing. Nothing here enforces it.
  */
 
 export * from './server/index.js';

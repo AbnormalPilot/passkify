@@ -10,8 +10,10 @@ license: MIT
 import { register, login, signInWithAutofill } from 'passkify/client';
 ```
 
-Always `passkify/client`, never the package root — the root is server code and
-importing it in a browser bundle fails at build time.
+Always `passkify/client`, never the package root. The root is the server half:
+since verification moved to WebCrypto it bundles for a browser without
+complaint, at roughly six times the size and with the whole verifier along for
+the ride. Nothing errors, so nothing will catch this for you.
 
 ## Sign up and sign in
 

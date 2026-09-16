@@ -13,7 +13,8 @@
     "content": "node scripts/build-content.mjs",
     "predev": "node scripts/build-content.mjs",
     "prebuild": "node scripts/build-content.mjs",
-    "check-numbers": "node scripts/check-numbers.mjs"
+    "check-numbers": "node scripts/check-numbers.mjs",
+    "pretypecheck": "node scripts/build-content.mjs"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",

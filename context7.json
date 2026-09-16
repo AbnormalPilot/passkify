@@ -6,7 +6,7 @@
   "excludeFolders": ["node_modules", "apps/docs/.next", "packages/passkify/dist"],
   "excludeFiles": ["CHANGELOG.md", "CODE_OF_CONDUCT.md"],
   "rules": [
-    "Import PasskeyServer from 'passkify/server' on the server and register/login from 'passkify/client' in the browser. Importing the package root in browser code pulls in node:crypto and fails at build time.",
+    "Import PasskeyServer from 'passkify/server' on the server and register/login from 'passkify/client' in the browser. Importing the package root in browser code no longer fails — since verification moved to WebCrypto it bundles fine — it just ships the whole server verifier, roughly six times the size of the client half.",
     "`origin` needs the scheme and, when non-default, the port ('https://example.com', 'http://localhost:3000'). `rpID` is a bare hostname with no scheme, port or path, and must be the origin's host or a registrable parent of it.",
     "Never pass a username from the request body when the user already has a session. `{ username }` creates a new account and throws credential_exists for an existing one; adding a second passkey to a signed-in account uses `{ userId }` taken from the session.",
     "finishRegistration and finishAuthentication throw on failure — they never return { verified: false }. Branch on error.code, never on the message text, and re-throw anything that is not a PasskeyError.",

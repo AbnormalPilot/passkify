@@ -38,18 +38,20 @@ import { PasskeyServer, MemoryStore } from 'passkify';        // Node
 import { register, login } from 'passkify/client';            // browser
 ```
 
-<Callout type="warning" title="Importing the server half into browser code fails at build time">
-That is deliberate. `passkify/server` pulls in `node:crypto`; if it could be
-imported silently you would ship a broken bundle instead of getting an error
-while you still have the file open.
+<Callout type="warning" title="Nothing stops you importing the server half into browser code">
+It used to stop itself: `passkify/server` pulled in `node:crypto` and a browser
+build failed on it. Verification is pure WebCrypto now, which is what makes the
+edge runtimes work — and the same change means the server half bundles for a
+browser without a word. You get the entire verifier, roughly six times the size
+of `passkify/client`, and no error. Import the subpath.
 </Callout>
 
 ## Requirements
 
 <PropList>
-  <Prop name="Node" type=">= 18">
-    Uses `node:crypto` for random bytes, SHA-256, and JWK public-key import.
-    JWK import is why 18 is the floor rather than 16.
+  <Prop name="Node" type=">= 20">
+    Or Bun, Deno, Cloudflare Workers or Vercel Edge — verification is pure
+    WebCrypto, so the server half is not tied to Node at all.
   </Prop>
   <Prop name="Module format" type="ESM and CommonJS">
     Both builds ship. `import` resolves to the ESM build, `require` to the
