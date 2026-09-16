@@ -9,7 +9,7 @@
  */
 
 import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative as relativePath, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
@@ -18,6 +18,15 @@ import { PasskeyServer, MemoryStore } from 'passkify/server';
 import { VirtualAuthenticator } from '#internal/testing/index.js';
 
 const SRC = fileURLToPath(new URL('../src', import.meta.url));
+
+/**
+ * The path below `src/`, always with forward slashes.
+ *
+ * The skips here match on prefixes like `cli/`, and Windows hands back
+ * `cli\\args.ts` — so on Windows every exemption silently stopped matching and
+ * the CLI was reported as an offender. Normalising once is the whole fix.
+ */
+const under = (file: string) => relativePath(SRC, file).split(sep).join('/');
 
 function* sourceFiles(dir: string): Generator<string> {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -30,7 +39,7 @@ function* sourceFiles(dir: string): Generator<string> {
 test('no source file on a ceremony path imports a node: built-in', () => {
   const offenders: string[] = [];
   for (const file of sourceFiles(SRC)) {
-    const relative = file.slice(SRC.length + 1);
+    const relative = under(file);
     // The CLI is a command-line tool: Node-only by definition, and unreachable
     // from any `exports` entry — which the next test asserts, because that is
     // the guarantee that actually protects an application bundle.
@@ -57,7 +66,7 @@ test('no source file on a ceremony path imports a node: built-in', () => {
 test('nothing outside the Node adapter reaches for Buffer or process', () => {
   const offenders: string[] = [];
   for (const file of sourceFiles(SRC)) {
-    const relative = file.slice(SRC.length + 1);
+    const relative = under(file);
     // The Express adapter is Node-only by definition; it reads a Node stream.
     // The virtual authenticator is a Node-only test double.
     if (relative === 'server/http/express.ts') continue;

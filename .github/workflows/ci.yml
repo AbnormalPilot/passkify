@@ -47,7 +47,12 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with: { node-version: '${{ matrix.node }}', cache: npm }
-      - run: npm ci
+      # `engine-strict` is on in .npmrc, and the only `engines` fields in this
+      # tree belong to dev tooling — the library has zero runtime dependencies,
+      # which the package job asserts separately. The coverage reporter wants
+      # Node 22, so on the Node 20 row a strict install refused to run the very
+      # matrix that proves the library still works on Node 20.
+      - run: npm ci --no-engine-strict
       - name: Typecheck
         run: npm run typecheck -w passkify
       # Runs against src/ — no build needed, which is what makes the older
