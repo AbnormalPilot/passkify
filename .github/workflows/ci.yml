@@ -137,7 +137,7 @@ jobs:
         with: { node-version: 24, cache: npm }
       - run: npm ci
       - run: npm run test:coverage -w passkify
-      - uses: codecov/codecov-action@v5
+      - uses: codecov/codecov-action@v6
         continue-on-error: true
         with:
           files: packages/passkify/coverage/lcov.info
