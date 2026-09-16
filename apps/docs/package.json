@@ -9,7 +9,11 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "check-links": "node scripts/check-links.mjs",
-    "verify": "npm run typecheck && npm run check-links && npm run build"
+    "verify": "npm run content && npm run typecheck && npm run check-links && npm run check-numbers && npm run build",
+    "content": "node scripts/build-content.mjs",
+    "predev": "node scripts/build-content.mjs",
+    "prebuild": "node scripts/build-content.mjs",
+    "check-numbers": "node scripts/check-numbers.mjs"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",
@@ -42,6 +46,7 @@
     "@types/node": "^22.10.5",
     "@types/react": "^19.0.7",
     "@types/react-dom": "^19.0.3",
+    "esbuild": "^0.28.2",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.3"
   }

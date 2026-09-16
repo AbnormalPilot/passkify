@@ -10,10 +10,7 @@
 
 import { PasskeyError } from '../shared/errors.js';
 
-export function translateWebAuthnError(
-  error: unknown,
-  ceremony: 'create' | 'get',
-): PasskeyError {
+export function translateWebAuthnError(error: unknown, ceremony: 'create' | 'get'): PasskeyError {
   if (error instanceof PasskeyError) {
     return error;
   }
@@ -43,7 +40,7 @@ export function translateWebAuthnError(
     case 'SecurityError':
       return new PasskeyError(
         'insecure_context',
-        'the page must be served over HTTPS (or localhost), and the server\'s rpID must be ' +
+        "the page must be served over HTTPS (or localhost), and the server's rpID must be " +
           "this page's domain or a parent of it",
         { cause: error },
       );

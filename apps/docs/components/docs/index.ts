@@ -3,3 +3,4 @@ export { ApiMethod, Reason, PropList, Prop, Returns, Throws, Throw } from './api
 export { Callout } from './callout';
 export { Steps, Step } from './steps';
 export { Cards, Card, Contrast, ContrastItem } from './cards';
+export { ChecksTable } from './checks-table';

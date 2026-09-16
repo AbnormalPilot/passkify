@@ -74,8 +74,7 @@ export function parseAuthenticatorData(bytes: Uint8Array): ParsedAuthenticatorDa
 
   const rpIdHash = bytes.subarray(0, 32);
   const rawFlags = bytes[32];
-  const signCount =
-    ((bytes[33] << 24) | (bytes[34] << 16) | (bytes[35] << 8) | bytes[36]) >>> 0;
+  const signCount = ((bytes[33] << 24) | (bytes[34] << 16) | (bytes[35] << 8) | bytes[36]) >>> 0;
 
   const flags: AuthenticatorDataFlags = {
     userPresent: (rawFlags & FLAG_UP) !== 0,

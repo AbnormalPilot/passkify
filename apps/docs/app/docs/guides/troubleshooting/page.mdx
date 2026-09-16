@@ -1,7 +1,11 @@
-export const metadata = {
+import { buildMetadata } from '@/lib/metadata';
+
+export const metadata = buildMetadata({
+  route: '/docs/guides/troubleshooting',
   title: 'Troubleshooting',
-  description: 'NotAllowedError, origin_mismatch, challenge_not_found, and testing on a phone.',
-};
+  description:
+    'NotAllowedError, origin_mismatch, challenge_not_found, and testing on a phone.',
+});
 
 Symptoms, causes, fixes. Ordered roughly by how often each comes up.
 

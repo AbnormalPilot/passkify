@@ -1,7 +1,11 @@
-export const metadata = {
+import { buildMetadata } from '@/lib/metadata';
+
+export const metadata = buildMetadata({
+  route: '/docs/storage',
   title: 'PasskeyStore',
-  description: 'The ten-method persistence contract and the three rules that matter.',
-};
+  description:
+    'The ten-method persistence contract and the three rules that matter.',
+});
 
 passkify never touches your database. You implement `PasskeyStore` against
 whatever you already run, and the library calls it.

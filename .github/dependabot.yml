@@ -1,0 +1,17 @@
+version: 2
+updates:
+  # The library has no runtime dependencies and must keep it that way; these
+  # are devDependencies and the docs site's tree.
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
+    groups:
+      types: { patterns: ['@types/*'] }
+      next: { patterns: ['next', '@next/*', 'react', 'react-dom', '@types/react*'] }
+      tooling: { patterns: ['typescript', '@biomejs/*', 'vitest', '@vitest/*'] }
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 3

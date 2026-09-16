@@ -1,8 +1,11 @@
-export const metadata = {
+import { buildMetadata } from '@/lib/metadata';
+
+export const metadata = buildMetadata({
+  route: '/docs',
   title: 'Introduction',
   description:
     'passkify adds passkeys to a website: client and server in one npm package, zero runtime dependencies.',
-};
+});
 
 ```bash
 npm install passkify
@@ -22,7 +25,7 @@ implement. Three things make it harder than it looks:
 - The server side needs a CBOR parser, COSE public-key handling, and signature
   verification across several algorithms, all operating on bytes an attacker
   controls.
-- Roughly fifteen separate checks have to pass before an assertion means
+- Fifteen separate checks have to pass before an assertion means
   anything. Miss one and you get either a login that never works or, worse, a
   login that always works.
 

@@ -10,8 +10,12 @@
     "noImplicitOverride": true,
     "noUnusedLocals": true,
     "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
+    "declarationMap": false,
+    // No sourcemaps in the published output. This build is `tsc` with no
+    // bundling and no minification, so dist/ is line-for-line recognisable as
+    // the source it came from — a stack trace into it reads fine. Maps with
+    // inlined sources were adding about half the tarball for that.
+    "sourceMap": false,
     "skipLibCheck": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,

@@ -1,7 +1,11 @@
-export const metadata = {
+import { buildMetadata } from '@/lib/metadata';
+
+export const metadata = buildMetadata({
+  route: '/docs/guides/security',
   title: 'Security model',
-  description: 'The full verification checklist, design decisions, and what stays your job.',
-};
+  description:
+    'The full verification checklist, design decisions, and what stays your job.',
+});
 
 ## Why passkeys resist phishing
 

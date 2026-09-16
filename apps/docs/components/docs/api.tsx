@@ -1,4 +1,4 @@
-import * as React from 'react';
+import type * as React from 'react';
 import { Lightbulb } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 
@@ -35,14 +35,31 @@ interface ApiMethodProps {
  * One documented member. Renders a real `<h3 id>` so it shows up in the
  * page's table of contents alongside prose headings.
  */
-export function ApiMethod({ name, signature, kind = 'method', advanced, children }: ApiMethodProps) {
+export function ApiMethod({
+  name,
+  signature,
+  kind = 'method',
+  advanced,
+  children,
+}: ApiMethodProps) {
   const id = slugify(name);
   return (
     <section className="mt-10 scroll-mt-24 first:mt-0">
-      <h3 id={id} className="!mt-0 flex flex-wrap items-baseline gap-2.5 font-mono text-[17px] font-medium tracking-[-0.17px]">
-        <a href={`#${id}`} className="heading-anchor">{name}</a>
-        <Badge variant="outline-light" className="t-mono-micro">{kind}</Badge>
-        {advanced && <Badge variant="mono" className="t-mono-micro">advanced</Badge>}
+      <h3
+        id={id}
+        className="!mt-0 flex flex-wrap items-baseline gap-2.5 font-mono text-[17px] font-medium tracking-[-0.17px]"
+      >
+        <a href={`#${id}`} className="heading-anchor">
+          {name}
+        </a>
+        <Badge variant="outline-light" className="t-mono-micro">
+          {kind}
+        </Badge>
+        {advanced && (
+          <Badge variant="mono" className="t-mono-micro">
+            advanced
+          </Badge>
+        )}
       </h3>
       {signature && (
         <pre className="!mt-3 !text-[12.5px]">
@@ -60,7 +77,13 @@ export function ApiMethod({ name, signature, kind = 'method', advanced, children
  * Kept visually distinct from prose so it can be skipped by someone who only
  * needs the signature, and found by someone deciding whether to fight the API.
  */
-export function Reason({ title = 'Why it works this way', children }: { title?: string; children: React.ReactNode }) {
+export function Reason({
+  title = 'Why it works this way',
+  children,
+}: {
+  title?: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="not-prose rounded-[6px] border-l-2 border-brand bg-canvas-paper p-md">
       <p className="t-mono-caps mb-2 flex items-center gap-1.5 text-graphite">
@@ -136,9 +159,7 @@ export function Returns({ type, children }: { type: string; children?: React.Rea
 export function Throws({ children }: { children: React.ReactNode }) {
   return (
     <div className="not-prose overflow-hidden rounded-[12px] border border-ink">
-      <p className="t-mono-caps bg-ink px-md py-2 text-on-primary">
-        Throws
-      </p>
+      <p className="t-mono-caps bg-ink px-md py-2 text-on-primary">Throws</p>
       <div className="divide-y divide-hairline">{children}</div>
     </div>
   );

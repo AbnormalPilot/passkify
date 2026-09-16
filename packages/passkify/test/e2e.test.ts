@@ -8,19 +8,21 @@
  * cookies set from the hooks.
  */
 
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 
-import { PasskeyServer, MemoryStore } from '../dist/esm/server/index.js';
-import { VirtualAuthenticator } from './helpers/virtual-authenticator.ts';
+import { PasskeyServer, MemoryStore } from 'passkify/server';
+import { VirtualAuthenticator } from '#internal/testing/index.js';
 
 const RP_ID = 'localhost';
 
 /** Boot an http server on an ephemeral port and return its origin. */
-async function boot(build: (origin: string) => (req: never, res: never, next: () => void) => unknown) {
+async function boot(
+  build: (origin: string) => (req: never, res: never, next: () => void) => unknown,
+) {
   let middleware: ReturnType<typeof build> | undefined;
 
   const server: Server = createServer((request, response) => {
@@ -39,6 +41,11 @@ async function boot(build: (origin: string) => (req: never, res: never, next: ()
   return {
     origin,
     async close() {
+      // `server.close()` alone waits for idle keep-alive sockets to time out,
+      // which after the oversized-body case means three seconds of the suite
+      // sitting still. That is a property of HTTP keep-alive, not of anything
+      // passkify does.
+      server.closeAllConnections();
       server.close();
       await once(server, 'close');
     },
@@ -186,7 +193,10 @@ test('an oversized body is rejected rather than buffered', async () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ padding: 'x'.repeat(2 * 1024 * 1024) }),
     });
-    assert.equal(response.status, 400);
+    // 413, not 400: the body was never parsed, so it is not malformed — it
+    // is too large, and the connection is closed rather than drained.
+    assert.equal(response.status, 413);
+    assert.equal((await response.json()).error, 'payload_too_large');
   } finally {
     await app.close();
   }

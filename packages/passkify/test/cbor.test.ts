@@ -1,8 +1,8 @@
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 
-import { decode, decodeFirst } from '../dist/esm/server/crypto/cbor.js';
-import { hex, encodeCBOR } from './helpers/cbor-encode.ts';
+import { decode, decodeFirst } from '#internal/server/crypto/cbor.js';
+import { hex, encodeCBOR } from '#internal/testing/cbor-encode.js';
 
 /**
  * Vectors lifted from RFC 8949 Appendix A. These are the authority — checking
@@ -35,8 +35,10 @@ const RFC_VECTORS: Array<[string, unknown]> = [
   ['80', []],
   ['83010203', [1, 2, 3]],
   ['8301820203820405', [1, [2, 3], [4, 5]]],
-  ['98190102030405060708090a0b0c0d0e0f101112131415161718181819',
-    Array.from({ length: 25 }, (_, i) => i + 1)],
+  [
+    '98190102030405060708090a0b0c0d0e0f101112131415161718181819',
+    Array.from({ length: 25 }, (_, i) => i + 1),
+  ],
 ];
 
 test('decodes the RFC 8949 Appendix A vectors', () => {
@@ -50,10 +52,19 @@ test('decodes RFC 8949 byte strings and maps', () => {
   assert.deepEqual(decode(hex('4401020304')), new Uint8Array([1, 2, 3, 4]));
 
   assert.deepEqual(decode(hex('a0')), new Map());
-  assert.deepEqual(decode(hex('a201020304')), new Map([[1, 2], [3, 4]]));
+  assert.deepEqual(
+    decode(hex('a201020304')),
+    new Map([
+      [1, 2],
+      [3, 4],
+    ]),
+  );
   assert.deepEqual(
     decode(hex('a26161016162820203')),
-    new Map<string, unknown>([['a', 1], ['b', [2, 3]]]),
+    new Map<string, unknown>([
+      ['a', 1],
+      ['b', [2, 3]],
+    ]),
   );
 });
 

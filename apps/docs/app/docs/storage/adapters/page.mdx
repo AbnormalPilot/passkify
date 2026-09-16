@@ -1,7 +1,11 @@
-export const metadata = {
+import { buildMetadata } from '@/lib/metadata';
+
+export const metadata = buildMetadata({
+  route: '/docs/storage/adapters',
   title: 'Store adapters',
-  description: 'Working PasskeyStore implementations for Postgres, Prisma, Drizzle, Redis and MongoDB.',
-};
+  description:
+    'Working PasskeyStore implementations for Postgres, Prisma, Drizzle, Redis and MongoDB.',
+});
 
 Complete implementations. Copy one, adjust the table names, ship it.
 

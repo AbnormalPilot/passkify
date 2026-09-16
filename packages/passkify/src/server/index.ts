@@ -45,6 +45,25 @@ export type { OriginMatcher } from './crypto/client-data.js';
 
 export { PasskeyError, isPasskeyError, type PasskeyErrorCode } from '../shared/errors.js';
 
+/**
+ * The verification checks, as data.
+ *
+ * Both verifiers index into this table, and the test suite fails if the two
+ * disagree in either direction — so it describes what the code does, not what
+ * it did when someone last wrote it down. Render your own documentation from
+ * it if you like; passkify's own does.
+ */
+export {
+  VERIFICATION_CHECKS,
+  REGISTRATION_CHECKS,
+  AUTHENTICATION_CHECKS,
+  checksFor,
+  getCheck,
+  type VerificationCheck,
+  type Ceremony,
+} from '../shared/checks.js';
+export type { CheckEvent, CheckObserver } from '../shared/trace.js';
+
 export {
   COSEAlgorithm,
   type RegistrationOptionsJSON,
@@ -67,3 +86,5 @@ export { parseClientData } from './crypto/client-data.js';
 export { parseCOSEPublicKey, verifySignature, algorithmName } from './crypto/cose.js';
 export { decode as decodeCBOR, decodeFirst as decodeCBORFirst } from './crypto/cbor.js';
 export { toBase64Url, fromBase64Url } from '../shared/base64url.js';
+export { Certificate, chainIsTrusted, OID as CertificateOID } from './crypto/x509.js';
+export { derToP1363, p1363ToDer } from './crypto/ecdsa-der.js';

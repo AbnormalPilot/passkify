@@ -1,7 +1,11 @@
-export const metadata = {
+import { buildMetadata } from '@/lib/metadata';
+
+export const metadata = buildMetadata({
+  route: '/docs/server/authentication',
   title: 'Authentication',
-  description: 'startAuthentication and finishAuthentication, usernameless and username-first.',
-};
+  description:
+    'startAuthentication and finishAuthentication, usernameless and username-first.',
+});
 
 Signing in. Two calls, and two flows that differ only in whether you name the
 account up front.
@@ -109,35 +113,18 @@ req.session.strongAuth = userVerified;
 
 </ApiMethod>
 
-### The fourteen checks
+### The checks
 
-In WebAuthn §7.2 order.
+<ChecksTable ceremony="authentication" />
 
-| # | Check | Failure code |
-| --- | --- | --- |
-| 1 | Challenge exists, unexpired, consumed on read | `challenge_not_found` |
-| 2 | Challenge was issued for a login | `type_mismatch` |
-| 3 | Signed challenge equals the issued one, constant time | `challenge_mismatch` |
-| 4 | `clientData.type` is `webauthn.get` | `type_mismatch` |
-| 5 | `clientData.origin` is allowed | `origin_mismatch` |
-| 6 | Not run inside a cross-origin frame | `origin_mismatch` |
-| 7 | Credential is registered | `unknown_credential` |
-| 8 | Credential belongs to the account the ceremony was scoped to | `unknown_credential` |
-| 9 | User handle in the response matches the credential's owner | `unknown_credential` |
-| 10 | `rpIdHash` equals SHA-256 of the configured `rpID` | `rpid_mismatch` |
-| 11 | User-present flag set | `user_not_present` |
-| 12 | User-verified flag set, when required | `user_not_verified` |
-| 13 | Signature verifies over `authenticatorData` and the client data hash | `bad_signature` |
-| 14 | Signature counter did not go backwards | `counter_regression` |
-
-<Reason title="Why checks 8 and 9 both exist">
+<Reason title="Why the account check and the user-handle check both exist">
 They defend different flows.
 
-Check 8 covers username-first: the ceremony was started for Ada, so a
+The account check covers username-first: the ceremony was started for Ada, so a
 credential belonging to Bob must not satisfy it, even though Bob's credential is
 perfectly valid and his signature verifies.
 
-Check 9 covers usernameless: there is no scoped account, so the user handle in
+The user-handle check covers usernameless: there is no scoped account, so the user handle in
 the response is what tells you who signed in. It has to agree with the
 credential's stored owner, or an attacker could present a valid signature from
 their own passkey alongside somebody else's handle.

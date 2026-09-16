@@ -1,7 +1,11 @@
-export const metadata = {
+import { buildMetadata } from '@/lib/metadata';
+
+export const metadata = buildMetadata({
+  route: '/docs/examples',
   title: 'Examples',
-  description: 'Complete runnable apps for Express and Next.js, with every file listed.',
-};
+  description:
+    'Complete runnable apps for Express and Next.js, with every file listed.',
+});
 
 Every file, in full. Nothing is elided and nothing links away: copy what is on
 this page and it runs.

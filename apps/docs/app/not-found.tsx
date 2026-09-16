@@ -47,9 +47,9 @@ export default function NotFound() {
             That page does not exist.
           </h1>
           <p className="t-subtitle mt-lg max-w-[52ch] text-ash">
-            It may have been renamed, or the link that brought you here may be older than the
-            page it points at. Search is on <span className="font-mono text-[0.9em]">⌘K</span>, and
-            every page in the documentation is listed in the sidebar.
+            It may have been renamed, or the link that brought you here may be older than the page
+            it points at. Search is on <span className="font-mono text-[0.9em]">⌘K</span>, and every
+            page in the documentation is listed in the sidebar.
           </p>
 
           <div className="mt-xxl flex flex-wrap gap-md">

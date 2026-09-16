@@ -15,13 +15,27 @@ import type { PasskeyServer } from '../passkey-server.js';
 import type { VerifyRegistrationResult } from '../registration.js';
 import type { VerifyAuthenticationResult } from '../authentication.js';
 import { dispatch, renderError, relativePath, type NormalizedRequest } from './routes.js';
+import { WELL_KNOWN_WEBAUTHN_PATH } from '../related-origin.js';
 
 export interface FetchAdapterOptions {
+  /**
+   * Send the developer-facing error message over the wire instead of the
+   * sanitised one.
+   *
+   * Off by default. Several messages name your configuration or internal
+   * state — the origin allow-list, a signature counter — which is useful in a
+   * terminal and is not something to hand an unauthenticated caller. Turn this
+   * on in development only.
+   */
+  verbose?: boolean;
+
   /** Where the routes live. Must match how you mounted the handler. Default `/passkey`. */
   basePath?: string;
 
   /** Resolve the signed-in account from the request (a cookie, a header, ...). */
-  getSessionUserId?: (request: Request) => string | null | undefined | Promise<string | null | undefined>;
+  getSessionUserId?: (
+    request: Request,
+  ) => string | null | undefined | Promise<string | null | undefined>;
 
   /**
    * Called after a successful registration.
@@ -48,6 +62,27 @@ export function createFetchHandler(server: PasskeyServer, options: FetchAdapterO
     const url = new URL(request.url);
     const path = relativePath(url.pathname, basePath);
 
+    // Served from the site root, above the mount, because the specification
+    // fixes its location. Handled here so the mount check below does not 404 it.
+    if (url.pathname === WELL_KNOWN_WEBAUTHN_PATH) {
+      const outcome = await dispatch(server, {
+        method: request.method.toUpperCase(),
+        path: '/',
+        pathname: url.pathname,
+        body: undefined,
+        sessionUserId: null,
+      });
+      if (outcome.kind === 'not-found') {
+        return json(404, { error: 'not_found', message: 'related origins are not enabled' });
+      }
+      return json(
+        outcome.status,
+        outcome.body,
+        undefined,
+        outcome.kind === 'json' ? outcome.cache : undefined,
+      );
+    }
+
     if (path === null) {
       return json(404, {
         error: 'configuration_error',
@@ -61,6 +96,7 @@ export function createFetchHandler(server: PasskeyServer, options: FetchAdapterO
       const normalized: NormalizedRequest = {
         method: request.method.toUpperCase(),
         path,
+        pathname: url.pathname,
         body: await readJsonBody(request),
         sessionUserId: (await options.getSessionUserId?.(request)) ?? null,
       };
@@ -88,7 +124,7 @@ export function createFetchHandler(server: PasskeyServer, options: FetchAdapterO
 
       return json(outcome.status, outcome.body, extra);
     } catch (error) {
-      const rendered = renderError(error);
+      const rendered = renderError(error, options.verbose ?? false);
       if (rendered.status >= 500) {
         // Surface real faults in the platform's logs.
         console.error('[passkify]', error);
@@ -98,10 +134,12 @@ export function createFetchHandler(server: PasskeyServer, options: FetchAdapterO
   };
 }
 
-function json(status: number, body: unknown, extraHeaders?: HeadersInit): Response {
+function json(status: number, body: unknown, extraHeaders?: HeadersInit, cache?: string): Response {
   const headers = new Headers(extraHeaders);
   headers.set('content-type', 'application/json; charset=utf-8');
-  headers.set('cache-control', 'no-store');
+  // Ceremony responses carry a challenge, so they must never be cached. The
+  // related-origins file is the one exception: it is public and static.
+  headers.set('cache-control', cache ?? 'no-store');
   return new Response(JSON.stringify(body), { status, headers });
 }
 

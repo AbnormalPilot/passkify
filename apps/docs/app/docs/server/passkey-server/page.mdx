@@ -1,7 +1,11 @@
-export const metadata = {
+import { buildMetadata } from '@/lib/metadata';
+
+export const metadata = buildMetadata({
+  route: '/docs/server/passkey-server',
   title: 'PasskeyServer',
-  description: 'The one object you construct, and every method it exposes.',
-};
+  description:
+    'The one object you construct, and every method it exposes.',
+});
 
 The one object you construct. Everything on the server side hangs off it.
 

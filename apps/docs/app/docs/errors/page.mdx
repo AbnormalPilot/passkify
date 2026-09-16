@@ -1,7 +1,11 @@
-export const metadata = {
+import { buildMetadata } from '@/lib/metadata';
+
+export const metadata = buildMetadata({
+  route: '/docs/errors',
   title: 'Errors',
-  description: 'Every PasskeyError code, what causes it, and what to do about it.',
-};
+  description:
+    'Every PasskeyError code, what causes it, and what to do about it.',
+});
 
 Everything thrown on either side of the wire is a `PasskeyError` carrying a
 stable machine-readable `code`.

@@ -1,0 +1,5 @@
+#!/bin/sh
+# Enable with: git config core.hooksPath .githooks
+set -e
+npx biome check --write --no-errors-on-unmatched --staged
+git update-index --again

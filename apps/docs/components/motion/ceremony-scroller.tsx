@@ -79,12 +79,15 @@ export function CeremonyScroller({
       { rootMargin: READING_LINE },
     );
 
-    items.forEach((item) => observer.observe(item));
+    for (const item of items) observer.observe(item);
     return () => observer.disconnect();
   }, []);
 
   return (
-    <div ref={scope} className="container-editorial md:grid md:grid-cols-[0.72fr_1.28fr] md:gap-xxl">
+    <div
+      ref={scope}
+      className="container-editorial md:grid md:grid-cols-[0.72fr_1.28fr] md:gap-xxl"
+    >
       {/* Held in place by `sticky`, not by a pin: the column stops at the top
           of the viewport for as long as the steps beside it are running, and
           the page underneath keeps scrolling normally. `self-start` is what

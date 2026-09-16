@@ -1,7 +1,11 @@
-export const metadata = {
+import { buildMetadata } from '@/lib/metadata';
+
+export const metadata = buildMetadata({
+  route: '/docs/server/adapters',
   title: 'HTTP adapters',
-  description: 'The Express middleware, the fetch handler, and the routes they mount.',
-};
+  description:
+    'The Express middleware, the fetch handler, and the routes they mount.',
+});
 
 Rather than writing four routes by hand, mount an adapter. Both expose the same
 endpoints and share the same internal dispatcher, so they cannot behave

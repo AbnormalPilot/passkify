@@ -1,7 +1,11 @@
-export const metadata = {
+import { buildMetadata } from '@/lib/metadata';
+
+export const metadata = buildMetadata({
+  route: '/docs/client',
   title: 'Client API',
-  description: 'register, login, autofill, capability detection, and the low-level ceremony calls.',
-};
+  description:
+    'register, login, autofill, capability detection, and the low-level ceremony calls.',
+});
 
 ```js
 import { register, login } from 'passkify/client';

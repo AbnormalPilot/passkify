@@ -10,6 +10,7 @@ import { BrandMark } from '@/components/brand-mark';
 import { DocsSidebar } from '@/components/docs-sidebar';
 import { SearchDialog } from '@/components/search-dialog';
 import { headerNav, siteLinks } from '@/lib/nav';
+import { LIBRARY_VERSION } from '@/lib/site';
 import { cn } from '@/lib/utils';
 
 /**
@@ -57,10 +58,7 @@ export function SiteHeader() {
         </Link>
 
         {/* Centred primary menu. */}
-        <nav
-          className="mx-auto hidden items-center gap-1 min-[960px]:flex"
-          aria-label="Sections"
-        >
+        <nav className="mx-auto hidden items-center gap-1 min-[960px]:flex" aria-label="Sections">
           {headerNav.map((item) => {
             const active =
               item.href === '/docs'
@@ -82,7 +80,7 @@ export function SiteHeader() {
         </nav>
 
         <div className="ml-auto flex items-center gap-sm min-[960px]:ml-0">
-          <span className="t-mono-micro hidden text-mute sm:inline">v0.1.0</span>
+          <span className="t-mono-micro hidden text-mute sm:inline">v{LIBRARY_VERSION}</span>
           <SearchDialog />
           <Button variant="secondary-dark" size="sm" asChild className="hidden sm:inline-flex">
             <a href={siteLinks.github} target="_blank" rel="noreferrer">

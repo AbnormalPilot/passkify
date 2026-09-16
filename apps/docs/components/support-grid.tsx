@@ -20,7 +20,9 @@ export function SupportGrid({ items }: { items: Support[] }) {
       /* The track takes exactly as many columns as there are items. A fixed
          count leaves a short row with an empty cell at the end, which reads as
          a missing entry rather than as spacing. */
-      style={{ '--cols': `repeat(${Math.min(items.length, 5)}, minmax(0, 1fr))` } as React.CSSProperties}
+      style={
+        { '--cols': `repeat(${Math.min(items.length, 5)}, minmax(0, 1fr))` } as React.CSSProperties
+      }
     >
       {items.map((item) => (
         <li key={item.name} className="bg-canvas-light">

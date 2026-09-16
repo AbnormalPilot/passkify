@@ -2,8 +2,21 @@ import type { MDXComponents } from 'mdx/types';
 import Link from 'next/link';
 import { Pre } from '@/components/code-block';
 import {
-  ApiMethod, Reason, PropList, Prop, Returns, Throws, Throw,
-  Callout, Steps, Step, Contrast, ContrastItem, Cards, Card,
+  ApiMethod,
+  Reason,
+  PropList,
+  Prop,
+  Returns,
+  Throws,
+  Throw,
+  Callout,
+  Steps,
+  Step,
+  Contrast,
+  ContrastItem,
+  Cards,
+  Card,
+  ChecksTable,
 } from '@/components/docs';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -17,7 +30,11 @@ export function useMDXComponents(components: MDXComponents): MDXComponents {
     a: ({ href, children, ...props }) => {
       const isInternal = typeof href === 'string' && href.startsWith('/');
       if (isInternal) {
-        return <Link href={href} {...props}>{children}</Link>;
+        return (
+          <Link href={href} {...props}>
+            {children}
+          </Link>
+        );
       }
       return (
         <a href={href} target="_blank" rel="noreferrer" {...props}>
@@ -35,9 +52,25 @@ export function useMDXComponents(components: MDXComponents): MDXComponents {
 
     pre: Pre,
 
-    ApiMethod, Reason, PropList, Prop, Returns, Throws, Throw,
-    Callout, Steps, Step, Contrast, ContrastItem, Cards, Card,
-    Tabs, TabsList, TabsTrigger, TabsContent,
+    ApiMethod,
+    Reason,
+    PropList,
+    Prop,
+    Returns,
+    Throws,
+    Throw,
+    Callout,
+    Steps,
+    Step,
+    Contrast,
+    ContrastItem,
+    Cards,
+    Card,
+    ChecksTable,
+    Tabs,
+    TabsList,
+    TabsTrigger,
+    TabsContent,
 
     ...components,
   };

@@ -1,7 +1,11 @@
-export const metadata = {
+import { buildMetadata } from '@/lib/metadata';
+
+export const metadata = buildMetadata({
+  route: '/docs/changelog',
   title: 'Changelog',
-  description: 'Release history, and the compatibility promise for each part of the API.',
-};
+  description:
+    'Release history, and the compatibility promise for each part of the API.',
+});
 
 ## What counts as a breaking change
 
@@ -44,6 +48,69 @@ See [how passkeys work](/docs/how-passkeys-work#relying-party-id).
 
 ## Releases
 
+<ApiMethod name="0.2.0" kind="release">
+
+<Callout type="warning" title="Two breaking changes">
+`counter_regression` answers **403** rather than 401 — branch on the code, not
+the status. **RS1** (COSE `-65535`, RSA with SHA-1) is gone, and a config that
+lists it in `supportedAlgorithms` now throws at construction.
+</Callout>
+
+**The verification path is pure WebCrypto**
+
+No `node:` built-in is imported anywhere a ceremony can reach, which is what
+makes the Cloudflare Workers, Deno and Vercel Edge support real rather than
+aspirational. A test walks every source file on each run and fails if one
+appears. X.509 handling is written here rather than delegated, and ECDSA
+signatures are converted from DER by a deliberately strict parser — a lenient
+one there is a signature-malleability bug.
+
+**Server**
+
+- WebAuthn Level 3: the three signal methods, `getClientCapabilities()`,
+  Related Origin Requests with the published file derived from `origin`,
+  conditional create, and `hints`/`extensions` pass-through including `prf`.
+- Adapters for Next.js, Hono, Fastify, SvelteKit, Remix and Cloudflare Workers.
+- Stores for Postgres, Prisma, Redis, MongoDB and SQLite, each taking the driver
+  you already have so none of them becomes a dependency.
+- A [check registry](/docs/server/registration#the-checks) the verifiers index
+  into, plus `explain: true` and an `onCheck` hook that return the trace.
+- `PasskeyError` gained `publicMessage` and `details`, so text written for a
+  developer is not sent to an unauthenticated caller. Adapters take
+  `verbose: true` to restore the old behaviour in development.
+
+**Browser**
+
+- `passkify/react`: `useRegister`, `useLogin`, `usePasskeyAutofill`,
+  `usePasskeys`, `usePasskeySupport`.
+- Client APIs for the credential-management routes that previously existed only
+  on the server: `listPasskeys`, `renamePasskey`, `deletePasskey`,
+  `syncPasskeys`.
+
+**Tooling**
+
+- `npx passkify` — `init`, `doctor`, `skills install`, and `mcp`, an MCP server
+  whose `validate_config` runs the real validator.
+- `passkify/store-conformance`, 19 cases including a genuine concurrency race on
+  `takeChallenge`, so a read-then-delete store fails rather than silently
+  permitting replay.
+- `passkify/testing`, the virtual authenticator the library's own suite uses.
+- `/llms.txt`, `/llms-full.txt` and a `.md` twin of every documentation page.
+
+**Fixed**
+
+- An attestation format passkify cannot verify no longer fails a registration
+  the site never asked for attestation on. `verifyAttestation` ran on every
+  registration and threw `unsupported_feature` (500) for any format without a
+  verifier, so TPM-backed Windows Hello could not register at all.
+- An oversized request body returns **413** and is drained rather than left
+  resolving to `undefined` with the connection open.
+- Declaration files are emitted for the CommonJS build as `.d.cts`, with `types`
+  per condition — the old layout was reported as "masquerading as ESM" for every
+  `require()`.
+
+</ApiMethod>
+
 <ApiMethod name="0.1.0" kind="release">
 
 Initial release.
@@ -81,5 +148,12 @@ Initial release.
 
 ## Upgrading
 
-There is nothing to upgrade from yet. When there is, this section will carry the
-migration steps for each major, and the [FAQ](/docs/faq) will point here.
+**0.1.0 to 0.2.0.** Two things to check, neither of which touches your database:
+
+1. If any code branches on the HTTP status of a counter regression, move it to
+   `error.code === 'counter_regression'`. The status changed from 401 to 403.
+2. If `supportedAlgorithms` lists RS1 (`-65535`), remove it. The server now
+   refuses to construct rather than accepting a SHA-1 signature.
+
+Stored `PasskeyCredential` and `PasskeyUser` records are unchanged, as are the
+wire types, so a mixed deploy keeps working while it rolls.

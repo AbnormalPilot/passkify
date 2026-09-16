@@ -1,7 +1,11 @@
-export const metadata = {
+import { buildMetadata } from '@/lib/metadata';
+
+export const metadata = buildMetadata({
+  route: '/docs/low-level',
   title: 'Low-level primitives',
-  description: 'CBOR, COSE keys, authenticator data. For tooling, not for websites.',
-};
+  description:
+    'CBOR, COSE keys, authenticator data. For tooling, not for websites.',
+});
 
 <Callout type="warning" title="You almost certainly do not need these">
 The four ceremony methods are the API. These exports exist for people building

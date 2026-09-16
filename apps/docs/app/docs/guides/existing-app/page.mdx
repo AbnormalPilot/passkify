@@ -1,7 +1,11 @@
-export const metadata = {
+import { buildMetadata } from '@/lib/metadata';
+
+export const metadata = buildMetadata({
+  route: '/docs/guides/existing-app',
   title: 'Adding to an existing app',
-  description: 'Staged rollout alongside passwords, without opening an account-takeover hole.',
-};
+  description:
+    'Staged rollout alongside passwords, without opening an account-takeover hole.',
+});
 
 You almost certainly should not replace passwords on day one. Here is the
 staged path, and the one mistake that turns a passkey rollout into an

@@ -4,9 +4,14 @@
     "outDir": "dist/cjs",
     "module": "CommonJS",
     "moduleResolution": "Node10",
-    "declaration": false,
+    "declaration": true,
     "declarationMap": false,
+    "sourceMap": false,
+    "inlineSources": false,
     "noUnusedLocals": false
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  // The CLI is ESM only — it is reached through bin/passkify.mjs, which imports
+  // dist/esm, and it uses import.meta, which CommonJS has no equivalent for.
+  "exclude": ["src/cli/**/*.ts"]
 }

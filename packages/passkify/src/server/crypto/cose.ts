@@ -1,16 +1,29 @@
 /**
- * COSE_Key (RFC 8152) parsing and signature verification.
+ * COSE_Key (RFC 8152) parsing and signature verification, over WebCrypto.
  *
  * Authenticators hand us public keys as COSE maps. Rather than hand-assemble
- * SPKI DER, we translate COSE into a JWK and let Node's `crypto` import it —
- * that keeps the curve/point validation inside OpenSSL where it belongs.
+ * SPKI DER, we translate COSE into a JWK and let `subtle.importKey` take it —
+ * which keeps curve and point validation inside the platform's crypto
+ * implementation, where it belongs.
+ *
+ * Two things changed when this moved off `node:crypto`, and both matter:
+ *
+ * Importing and verifying are now asynchronous. That is what makes the package
+ * run on Cloudflare Workers, Deno and Bun, where `node:crypto` is absent or
+ * partial, and it is why the ceremony verifiers are async all the way down.
+ *
+ * ECDSA signatures have to be converted. Authenticators emit ASN.1 DER;
+ * `subtle.verify` accepts only fixed-width `r ‖ s`. Node's legacy `verify`
+ * silently accepted both, which is why no conversion existed before. See
+ * `ecdsa-der.ts` — it is the strictest parser in this package for a reason.
  */
 
-import { createPublicKey, verify as nodeVerify, constants, type KeyObject } from 'node:crypto';
+import { crypto } from './provider.js';
 import { PasskeyError } from '../../shared/errors.js';
 import { COSEAlgorithm } from '../../shared/types.js';
 import { toBase64Url } from '../../shared/base64url.js';
 import { decodeMap, type CBORMap, type CBORValue } from './cbor.js';
+import { derToP1363, type CurveName } from './ecdsa-der.js';
 
 /** COSE_Key common parameters. */
 const COSEKeyLabel = { kty: 1, alg: 3 } as const;
@@ -23,7 +36,7 @@ const COSEKeyType = { OKP: 1, EC2: 2, RSA: 3 } as const;
 const COSECurve = { P256: 1, P384: 2, P521: 3, Ed25519: 6 } as const;
 
 interface ECParams {
-  jwkCurve: 'P-256' | 'P-384' | 'P-521';
+  jwkCurve: CurveName;
   /** Byte length of one coordinate. */
   coordinateSize: number;
 }
@@ -34,59 +47,90 @@ const EC_CURVES: Record<number, ECParams> = {
   [COSECurve.P521]: { jwkCurve: 'P-521', coordinateSize: 66 },
 };
 
+type HashName = 'SHA-256' | 'SHA-384' | 'SHA-512';
+
 interface AlgorithmSpec {
   name: string;
-  /** Node digest name, or `null` for Ed25519 which hashes internally. */
-  hash: string | null;
   keyType: number;
-  /** For EC algorithms, the one curve the spec pins them to. */
+  /** For EC algorithms, the one curve the specification pins them to. */
   curve?: number;
-  rsaPadding?: number;
+  /** Absent for Ed25519, which hashes internally. */
+  hash?: HashName;
+  /** WebCrypto algorithm family. */
+  family: 'ECDSA' | 'RSASSA-PKCS1-v1_5' | 'RSA-PSS' | 'Ed25519';
 }
 
+/**
+ * Every algorithm passkify can verify.
+ *
+ * RS1 (COSE -65535, RSA with SHA-1) is deliberately absent. It was reachable
+ * here before 1.0 for anyone who put it in `supportedAlgorithms`, and SHA-1
+ * signature verification has no place in an authentication library. Asking for
+ * it now fails at configuration time rather than at login.
+ */
 const ALGORITHMS: Record<number, AlgorithmSpec> = {
   [COSEAlgorithm.ES256]: {
     name: 'ES256',
-    hash: 'sha256',
     keyType: COSEKeyType.EC2,
     curve: COSECurve.P256,
+    hash: 'SHA-256',
+    family: 'ECDSA',
   },
   [COSEAlgorithm.ES384]: {
     name: 'ES384',
-    hash: 'sha384',
     keyType: COSEKeyType.EC2,
     curve: COSECurve.P384,
+    hash: 'SHA-384',
+    family: 'ECDSA',
   },
   [COSEAlgorithm.ES512]: {
     name: 'ES512',
-    hash: 'sha512',
     keyType: COSEKeyType.EC2,
     curve: COSECurve.P521,
+    hash: 'SHA-512',
+    family: 'ECDSA',
   },
-  [COSEAlgorithm.EdDSA]: { name: 'EdDSA', hash: null, keyType: COSEKeyType.OKP },
-  [COSEAlgorithm.RS256]: { name: 'RS256', hash: 'sha256', keyType: COSEKeyType.RSA },
-  [COSEAlgorithm.RS384]: { name: 'RS384', hash: 'sha384', keyType: COSEKeyType.RSA },
-  [COSEAlgorithm.RS512]: { name: 'RS512', hash: 'sha512', keyType: COSEKeyType.RSA },
-  [COSEAlgorithm.RS1]: { name: 'RS1', hash: 'sha1', keyType: COSEKeyType.RSA },
+  [COSEAlgorithm.EdDSA]: { name: 'EdDSA', keyType: COSEKeyType.OKP, family: 'Ed25519' },
+  [COSEAlgorithm.RS256]: {
+    name: 'RS256',
+    keyType: COSEKeyType.RSA,
+    hash: 'SHA-256',
+    family: 'RSASSA-PKCS1-v1_5',
+  },
+  [COSEAlgorithm.RS384]: {
+    name: 'RS384',
+    keyType: COSEKeyType.RSA,
+    hash: 'SHA-384',
+    family: 'RSASSA-PKCS1-v1_5',
+  },
+  [COSEAlgorithm.RS512]: {
+    name: 'RS512',
+    keyType: COSEKeyType.RSA,
+    hash: 'SHA-512',
+    family: 'RSASSA-PKCS1-v1_5',
+  },
   [COSEAlgorithm.PS256]: {
     name: 'PS256',
-    hash: 'sha256',
     keyType: COSEKeyType.RSA,
-    rsaPadding: constants.RSA_PKCS1_PSS_PADDING,
+    hash: 'SHA-256',
+    family: 'RSA-PSS',
   },
   [COSEAlgorithm.PS384]: {
     name: 'PS384',
-    hash: 'sha384',
     keyType: COSEKeyType.RSA,
-    rsaPadding: constants.RSA_PKCS1_PSS_PADDING,
+    hash: 'SHA-384',
+    family: 'RSA-PSS',
   },
   [COSEAlgorithm.PS512]: {
     name: 'PS512',
-    hash: 'sha512',
     keyType: COSEKeyType.RSA,
-    rsaPadding: constants.RSA_PKCS1_PSS_PADDING,
+    hash: 'SHA-512',
+    family: 'RSA-PSS',
   },
 };
+
+/** Digest output size in bytes, which RSA-PSS needs as its salt length. */
+const HASH_SIZE: Record<HashName, number> = { 'SHA-256': 32, 'SHA-384': 48, 'SHA-512': 64 };
 
 export interface ParsedCOSEKey {
   /** COSE algorithm identifier, e.g. -7 for ES256. */
@@ -94,7 +138,9 @@ export interface ParsedCOSEKey {
   /** Human-readable algorithm name, e.g. `"ES256"`. */
   algName: string;
   /** Imported and validated public key, ready for `verifySignature`. */
-  key: KeyObject;
+  key: CryptoKey;
+  /** For EC keys, the curve — `verifySignature` needs it to size the signature. */
+  curve?: CurveName;
 }
 
 function fail(message: string, cause?: unknown): never {
@@ -148,8 +194,63 @@ function stripLeadingZeros(value: Uint8Array, what: string): Uint8Array {
   return trimmed;
 }
 
-/** Parse a COSE_Key into a validated Node public key. */
-export function parseCOSEPublicKey(coseBytes: Uint8Array): ParsedCOSEKey {
+/**
+ * Ed25519 is the one algorithm whose WebCrypto availability is uneven: some
+ * older runtimes expose it only under the pre-standard `NODE-ED25519` name, and
+ * a few edge runtimes lack it entirely. Probe once, on first use, and cache.
+ *
+ * It is not in the default `pubKeyCredParams`, so nothing reaches this unless a
+ * site asked for EdDSA explicitly.
+ */
+let ed25519Name: 'Ed25519' | 'NODE-ED25519' | null | undefined;
+
+async function resolveEd25519Name(): Promise<'Ed25519' | 'NODE-ED25519'> {
+  if (ed25519Name === undefined) {
+    ed25519Name = null;
+    // A throwaway key with a known-good x coordinate: the base point.
+    const probe = { kty: 'OKP', crv: 'Ed25519', x: toBase64Url(new Uint8Array(32).fill(1)) };
+    for (const candidate of ['Ed25519', 'NODE-ED25519'] as const) {
+      try {
+        await crypto.subtle.importKey(
+          'jwk',
+          probe as JsonWebKey,
+          { name: candidate, namedCurve: candidate } as unknown as AlgorithmIdentifier,
+          false,
+          ['verify'],
+        );
+        ed25519Name = candidate;
+        break;
+      } catch {
+        // Try the next name.
+      }
+    }
+  }
+
+  if (!ed25519Name) {
+    throw new PasskeyError(
+      'unsupported_algorithm',
+      'this runtime cannot verify Ed25519 signatures. Remove -8 (EdDSA) from ' +
+        '`supportedAlgorithms`, or run on a runtime whose WebCrypto implements it.',
+    );
+  }
+  return ed25519Name;
+}
+
+/** True when this runtime can actually verify the given COSE algorithm. */
+export async function canVerifyAlgorithm(alg: number): Promise<boolean> {
+  const spec = ALGORITHMS[alg];
+  if (!spec) return false;
+  if (spec.family !== 'Ed25519') return true;
+  try {
+    await resolveEd25519Name();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Parse a COSE_Key into a validated, imported public key. */
+export async function parseCOSEPublicKey(coseBytes: Uint8Array): Promise<ParsedCOSEKey> {
   const map = decodeMap(coseBytes);
 
   const kty = requireInt(map, COSEKeyLabel.kty, 'key type (kty)');
@@ -167,19 +268,31 @@ export function parseCOSEPublicKey(coseBytes: Uint8Array): ParsedCOSEKey {
   }
 
   let jwk: Record<string, string>;
+  let importParams: AlgorithmIdentifier | RsaHashedImportParams | EcKeyImportParams;
+  let curve: CurveName | undefined;
 
   if (kty === COSEKeyType.EC2) {
     const crv = requireInt(map, COSEKeyTypeLabel.crv, 'curve (crv)');
     if (spec.curve !== undefined && crv !== spec.curve) {
       fail(`algorithm ${spec.name} requires curve ${spec.curve}, got ${crv}`);
     }
-    const curve = EC_CURVES[crv];
-    if (!curve) {
+    const params = EC_CURVES[crv];
+    if (!params) {
       throw new PasskeyError('unsupported_algorithm', `COSE curve ${crv} is not supported`);
     }
-    const x = padCoordinate(requireBytes(map, COSEKeyTypeLabel.x, 'x coordinate'), curve.coordinateSize, 'x');
-    const y = padCoordinate(requireBytes(map, COSEKeyTypeLabel.y, 'y coordinate'), curve.coordinateSize, 'y');
-    jwk = { kty: 'EC', crv: curve.jwkCurve, x: toBase64Url(x), y: toBase64Url(y) };
+    const x = padCoordinate(
+      requireBytes(map, COSEKeyTypeLabel.x, 'x coordinate'),
+      params.coordinateSize,
+      'x',
+    );
+    const y = padCoordinate(
+      requireBytes(map, COSEKeyTypeLabel.y, 'y coordinate'),
+      params.coordinateSize,
+      'y',
+    );
+    curve = params.jwkCurve;
+    jwk = { kty: 'EC', crv: params.jwkCurve, x: toBase64Url(x), y: toBase64Url(y) };
+    importParams = { name: 'ECDSA', namedCurve: params.jwkCurve };
   } else if (kty === COSEKeyType.OKP) {
     const crv = requireInt(map, COSEKeyTypeLabel.crv, 'curve (crv)');
     if (crv !== COSECurve.Ed25519) {
@@ -193,6 +306,8 @@ export function parseCOSEPublicKey(coseBytes: Uint8Array): ParsedCOSEKey {
       fail(`Ed25519 public key must be 32 bytes, got ${x.length}`);
     }
     jwk = { kty: 'OKP', crv: 'Ed25519', x: toBase64Url(x) };
+    const name = await resolveEd25519Name();
+    importParams = { name, namedCurve: name } as unknown as AlgorithmIdentifier;
   } else if (kty === COSEKeyType.RSA) {
     const n = stripLeadingZeros(requireBytes(map, COSEKeyTypeLabel.n, 'modulus (n)'), 'modulus');
     const e = stripLeadingZeros(requireBytes(map, COSEKeyTypeLabel.e, 'exponent (e)'), 'exponent');
@@ -200,54 +315,74 @@ export function parseCOSEPublicKey(coseBytes: Uint8Array): ParsedCOSEKey {
       fail(`RSA modulus is ${n.length * 8} bits; refusing anything below 2048`);
     }
     jwk = { kty: 'RSA', n: toBase64Url(n), e: toBase64Url(e) };
+    // WebCrypto binds the hash to the key at import, so the key is imported per
+    // algorithm rather than cached across them. A credential has exactly one
+    // algorithm, so this costs nothing.
+    importParams = { name: spec.family, hash: spec.hash as HashName };
   } else {
     throw new PasskeyError('unsupported_algorithm', `COSE key type ${kty} is not supported`);
   }
 
-  let key: KeyObject;
+  let key: CryptoKey;
   try {
-    key = createPublicKey({ key: jwk as never, format: 'jwk' });
+    key = await crypto.subtle.importKey('jwk', jwk as JsonWebKey, importParams, false, ['verify']);
   } catch (cause) {
     fail('the public key was rejected as invalid', cause);
   }
 
-  return { alg, algName: spec.name, key };
+  return { alg, algName: spec.name, key, ...(curve ? { curve } : {}) };
 }
 
 /**
  * Verify a WebAuthn signature.
  *
  * Returns a boolean rather than throwing: "did not verify" is an expected
- * outcome, not an exceptional one. Genuine problems (an unusable key) still
- * throw.
+ * outcome, not an exceptional one. Genuine problems (an unusable key) throw.
  */
-export function verifySignature(
+export async function verifySignature(
   parsed: ParsedCOSEKey,
   data: Uint8Array,
   signature: Uint8Array,
-): boolean {
+): Promise<boolean> {
   const spec = ALGORITHMS[parsed.alg];
   if (!spec) {
-    throw new PasskeyError('unsupported_algorithm', `COSE algorithm ${parsed.alg} is not supported`);
+    throw new PasskeyError(
+      'unsupported_algorithm',
+      `COSE algorithm ${parsed.alg} is not supported`,
+    );
+  }
+
+  let params: AlgorithmIdentifier | RsaPssParams | EcdsaParams;
+  let bytes = signature;
+
+  switch (spec.family) {
+    case 'ECDSA': {
+      params = { name: 'ECDSA', hash: spec.hash as HashName };
+      // Throws for a malformed signature — which is a failed verification, so
+      // it is caught below rather than surfacing as a server fault.
+      bytes = derToP1363(signature, parsed.curve ?? 'P-256');
+      break;
+    }
+    case 'RSA-PSS':
+      params = { name: 'RSA-PSS', saltLength: HASH_SIZE[spec.hash as HashName] };
+      break;
+    case 'Ed25519':
+      params = { name: await resolveEd25519Name() };
+      break;
+    default:
+      params = { name: 'RSASSA-PKCS1-v1_5' };
+      break;
   }
 
   try {
-    if (spec.rsaPadding !== undefined) {
-      return nodeVerify(
-        spec.hash,
-        data,
-        {
-          key: parsed.key,
-          padding: spec.rsaPadding,
-          saltLength: constants.RSA_PSS_SALTLEN_DIGEST,
-        },
-        signature,
-      );
-    }
-    return nodeVerify(spec.hash, data, parsed.key, signature);
+    return await crypto.subtle.verify(
+      params,
+      parsed.key,
+      bytes as unknown as BufferSource,
+      data as unknown as BufferSource,
+    );
   } catch {
-    // OpenSSL throws on structurally invalid signatures (e.g. malformed ECDSA
-    // DER). That is a failed verification, not a server fault.
+    // A structurally invalid signature is a failed verification, not a fault.
     return false;
   }
 }
@@ -257,12 +392,8 @@ export function algorithmName(alg: number): string | undefined {
   return ALGORITHMS[alg]?.name;
 }
 
-/**
- * The Node digest name a COSE algorithm signs with, or `null` for Ed25519
- * (which hashes internally and takes `null` as its algorithm in `crypto.verify`).
- * Throws for algorithms passkify cannot verify.
- */
-export function digestForAlgorithm(alg: number): string | null {
+/** The digest a COSE algorithm signs with, or `undefined` for Ed25519. */
+export function digestForAlgorithm(alg: number): HashName | undefined {
   const spec = ALGORITHMS[alg];
   if (!spec) {
     throw new PasskeyError('unsupported_algorithm', `COSE algorithm ${alg} is not supported`);
@@ -270,18 +401,7 @@ export function digestForAlgorithm(alg: number): string | null {
   return spec.hash;
 }
 
-/** The RSA-PSS padding options for a COSE algorithm, if it needs any. */
-export function rsaPssOptionsFor(
-  alg: number,
-): { padding: number; saltLength: number } | undefined {
-  const spec = ALGORITHMS[alg];
-  if (!spec || spec.rsaPadding === undefined) {
-    return undefined;
-  }
-  return { padding: spec.rsaPadding, saltLength: constants.RSA_PSS_SALTLEN_DIGEST };
-}
-
-/** True when passkify can verify signatures for this COSE algorithm. */
+/** True when passkify knows how to verify signatures for this COSE algorithm. */
 export function isSupportedAlgorithm(alg: number): boolean {
   return alg in ALGORITHMS;
 }

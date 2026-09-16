@@ -1,0 +1,13 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/AbnormalPilot/passkify/security/advisories/new
+    about: >
+      Report privately. Never open a public issue for an authentication
+      bypass or a verification weakness.
+  - name: Question or idea
+    url: https://github.com/AbnormalPilot/passkify/discussions
+    about: For usage questions and open-ended discussion.
+  - name: Documentation
+    url: https://passkify.himanshubuilds.in/docs
+    about: The API reference, guides, and the troubleshooting page.

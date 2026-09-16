@@ -1,7 +1,11 @@
-export const metadata = {
+import { buildMetadata } from '@/lib/metadata';
+
+export const metadata = buildMetadata({
+  route: '/docs/installation',
   title: 'Installation',
-  description: 'Install passkify, pick the right entry point, and check runtime requirements.',
-};
+  description:
+    'Install passkify, pick the right entry point, and check runtime requirements.',
+});
 
 ```bash
 npm install passkify

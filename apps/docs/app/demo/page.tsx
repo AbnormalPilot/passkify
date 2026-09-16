@@ -5,12 +5,14 @@ import { SiteFooter } from '@/components/site-footer';
 import { CodeWindow } from '@/components/code-window';
 import { Button } from '@/components/ui/button';
 import { DemoConsole } from '@/components/demo-console';
+import { buildMetadata } from '@/lib/metadata';
 
-export const metadata: Metadata = {
+export const metadata: Metadata = buildMetadata({
+  route: '/demo',
   title: 'Demo',
   description:
     'A working passwordless sign-up and sign-in, running the published passkify package against your own authenticator.',
-};
+});
 
 const STEPS = [
   {
@@ -85,9 +87,7 @@ export default function DemoPage() {
         <section className="section-paper">
           <div className="container-editorial">
             <p className="t-mono-eyebrow text-graphite">What is running</p>
-            <h2 className="t-display-md mt-lg max-w-[20ch] text-ink">
-              Both halves, in full
-            </h2>
+            <h2 className="t-display-md mt-lg max-w-[20ch] text-ink">Both halves, in full</h2>
 
             <div className="mt-xxl grid gap-lg lg:grid-cols-2">
               <CodeWindow
@@ -123,7 +123,10 @@ signInWithAutofill().then(refresh);`}
                 />
                 <p className="t-body max-w-[46ch] text-graphite">
                   Both files are reproduced in full on the{' '}
-                  <Link href="/docs/examples" className="text-link-blue underline underline-offset-4">
+                  <Link
+                    href="/docs/examples"
+                    className="text-link-blue underline underline-offset-4"
+                  >
                     examples page
                   </Link>
                   .
@@ -136,7 +139,7 @@ signInWithAutofill().then(refresh);`}
         <section className="section-dark">
           <div className="container-editorial text-center">
             <p className="t-subtitle mx-auto max-w-[48ch] text-ash">
-              When it works here, the same twelve lines work in your application.
+              When it works here, that same route handler works in your application.
             </p>
             <div className="mt-xl flex flex-wrap items-center justify-center gap-sm">
               <Button variant="primary" size="lg" asChild>

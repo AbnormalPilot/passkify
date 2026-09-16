@@ -1,4 +1,7 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
+import { SITE_ORIGIN, absoluteUrl } from '@/lib/site';
+import { JsonLd } from '@/components/json-ld';
+import { softwareApplicationSchema, webSiteSchema } from '@/lib/schema';
 import { Inter, IBM_Plex_Mono } from 'next/font/google';
 import './globals.css';
 
@@ -27,13 +30,57 @@ const mono = IBM_Plex_Mono({
   display: 'swap',
 });
 
+const TITLE = 'passkify — passkeys for your website';
+const DESCRIPTION =
+  'Complete documentation for passkify: passkeys for your website, with client and server in one npm package and zero runtime dependencies.';
+
 export const metadata: Metadata = {
+  /* Everything relative below — canonicals, OG images — resolves against this.
+     Without it Next silently drops them, which is why they were absent. */
+  metadataBase: new URL(SITE_ORIGIN),
   title: {
     default: 'passkify',
     template: '%s | passkify',
   },
-  description:
-    'Complete documentation for passkify: passkeys for your website, with client and server in one npm package and zero runtime dependencies.',
+  description: DESCRIPTION,
+  applicationName: 'passkify',
+  authors: [{ name: 'Himanshu Dubey', url: 'https://github.com/AbnormalPilot' }],
+  creator: 'Himanshu Dubey',
+  keywords: [
+    'passkey',
+    'passkeys',
+    'webauthn',
+    'fido2',
+    'authentication',
+    'passwordless',
+    'login',
+    'auth',
+    'typescript',
+    'node',
+  ],
+  openGraph: {
+    type: 'website',
+    siteName: 'passkify',
+    title: TITLE,
+    description: DESCRIPTION,
+    url: absoluteUrl('/'),
+    locale: 'en_US',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: TITLE,
+    description: DESCRIPTION,
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: { index: true, follow: true, 'max-image-preview': 'large', 'max-snippet': -1 },
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: '#0b0b0b',
+  colorScheme: 'light',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -44,6 +91,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           attribute-level and one level deep only — it does not mask real
           mismatches inside {children}. */}
       <body className="antialiased" suppressHydrationWarning>
+        <JsonLd data={softwareApplicationSchema()} />
+        <JsonLd data={webSiteSchema()} />
         {children}
       </body>
     </html>

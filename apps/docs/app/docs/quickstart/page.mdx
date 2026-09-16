@@ -1,7 +1,11 @@
-export const metadata = {
+import { buildMetadata } from '@/lib/metadata';
+
+export const metadata = buildMetadata({
+  route: '/docs/quickstart',
   title: 'Quickstart',
-  description: 'A working passwordless sign-up and sign-in, end to end.',
-};
+  description:
+    'A working passwordless sign-up and sign-in, end to end.',
+});
 
 A complete Express app with passwordless sign-up and sign-in. Copy it, run it,
 then replace the store.
@@ -141,7 +145,7 @@ statement about the ceremony.
 
 <Step title="Your server verified it and stored the public half">
 
-`POST /passkey/register/finish` ran fifteen checks, and only then created the
+`POST /passkey/register/finish` ran eighteen checks, and only then created the
 account and stored the credential. An abandoned prompt leaves nothing behind.
 
 </Step>

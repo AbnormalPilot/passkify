@@ -64,7 +64,8 @@ export function Reveal({
         const root = scope.current;
         if (!root) return;
 
-        const arrived = () => root.getBoundingClientRect().top < window.innerHeight * ALREADY_ARRIVED;
+        const arrived = () =>
+          root.getBoundingClientRect().top < window.innerHeight * ALREADY_ARRIVED;
 
         // Mounted with the section already on screen: never hide it at all.
         if (arrived()) return;

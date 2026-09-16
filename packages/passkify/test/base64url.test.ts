@@ -1,8 +1,8 @@
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 
-import { toBase64Url, fromBase64Url } from '../dist/esm/shared/base64url.js';
+import { toBase64Url, fromBase64Url } from '#internal/shared/base64url.js';
 
 test('base64url encoding matches Node for every short length', () => {
   for (let length = 0; length <= 64; length++) {

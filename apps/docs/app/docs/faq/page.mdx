@@ -1,7 +1,11 @@
-export const metadata = {
+import { buildMetadata } from '@/lib/metadata';
+
+export const metadata = buildMetadata({
+  route: '/docs/faq',
   title: 'FAQ',
-  description: 'Short answers to the questions that come up before and during adoption.',
-};
+  description:
+    'Short answers to the questions that come up before and during adoption.',
+});
 
 ## Adoption
 
@@ -151,9 +155,10 @@ See [store adapters](/docs/storage/adapters#redis-for-challenges-only).
 
 <ApiMethod name="Can I run this on an edge runtime?" kind="question">
 
-The browser half, yes. The server half needs `node:crypto`, so it needs a Node
-runtime. Cloudflare Workers can do it with `nodejs_compat` enabled; test that on
-your target before committing.
+Both halves, yes. The verification path is pure WebCrypto, so nothing on a
+ceremony path imports a `node:` built-in — a test walks the source on every run
+and fails if one does. Cloudflare Workers, Deno and Vercel Edge need no
+compatibility flag.
 
 </ApiMethod>
 

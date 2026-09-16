@@ -1,8 +1,8 @@
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 
-import { PasskeyServer, MemoryStore } from '../dist/esm/server/index.js';
-import { VirtualAuthenticator } from './helpers/virtual-authenticator.ts';
+import { PasskeyServer, MemoryStore } from 'passkify/server';
+import { VirtualAuthenticator } from '#internal/testing/index.js';
 
 const RP_ID = 'example.com';
 const ORIGIN = 'https://example.com';
@@ -36,7 +36,10 @@ test('the fetch handler runs a full sign-up then sign-in', async () => {
   const options = await startResponse.json();
 
   const finishResponse = await handler(
-    post('/register/finish', authenticator.create({ challenge: options.challenge, origin: ORIGIN })),
+    post(
+      '/register/finish',
+      authenticator.create({ challenge: options.challenge, origin: ORIGIN }),
+    ),
   );
   assert.equal(finishResponse.status, 200);
   const registered = await finishResponse.json();
@@ -92,7 +95,10 @@ test('the onLogin hook can take over the response entirely', async () => {
   const options = await (await handler(post('/register/start', { username: 'ada' }))).json();
   const registered = await (
     await handler(
-      post('/register/finish', authenticator.create({ challenge: options.challenge, origin: ORIGIN })),
+      post(
+        '/register/finish',
+        authenticator.create({ challenge: options.challenge, origin: ORIGIN }),
+      ),
     )
   ).json();
 
@@ -123,7 +129,10 @@ test('the onLogin hook can merge headers, e.g. a session cookie', async () => {
   const options = await (await handler(post('/register/start', { username: 'ada' }))).json();
   const registered = await (
     await handler(
-      post('/register/finish', authenticator.create({ challenge: options.challenge, origin: ORIGIN })),
+      post(
+        '/register/finish',
+        authenticator.create({ challenge: options.challenge, origin: ORIGIN }),
+      ),
     )
   ).json();
 
@@ -195,12 +204,17 @@ test('with a session, credential management works and username is ignored', asyn
     }),
   );
   assert.equal(remove.status, 200);
-  assert.equal((await (await handler(new Request(`${ORIGIN}${BASE}/credentials`))).json()).length, 1);
+  assert.equal(
+    (await (await handler(new Request(`${ORIGIN}${BASE}/credentials`))).json()).length,
+    1,
+  );
 });
 
 test('a mismatched basePath says so instead of failing mysteriously', async () => {
   const { handler } = makeHandler();
-  const response = await handler(new Request(`${ORIGIN}/wrong/place/login/start`, { method: 'POST' }));
+  const response = await handler(
+    new Request(`${ORIGIN}/wrong/place/login/start`, { method: 'POST' }),
+  );
 
   assert.equal(response.status, 404);
   const body = await response.json();

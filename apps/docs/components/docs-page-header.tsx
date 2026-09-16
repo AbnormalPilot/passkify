@@ -3,6 +3,9 @@
 import { usePathname } from 'next/navigation';
 import { ChevronRight } from 'lucide-react';
 import { flatNav, getSectionTitle } from '@/lib/nav';
+import { JsonLd } from '@/components/json-ld';
+import { getPage } from '@/lib/content';
+import { techArticleSchema, breadcrumbSchema } from '@/lib/schema';
 
 /**
  * Breadcrumb, title and standfirst, rendered from `lib/nav.ts`.
@@ -18,24 +21,31 @@ export function DocsPageHeader() {
 
   if (!page) return null;
 
+  // The visible breadcrumb and the structured one are built from the same
+  // source, so they cannot say different things.
+  const generated = getPage(pathname);
+
   return (
-    <header className="mb-8">
-      {section && (
-        <nav aria-label="Breadcrumb" className="t-mono-caps mb-md flex items-center gap-1.5 text-graphite">
-          <span>Docs</span>
-          <ChevronRight className="size-3" />
-          <span>{section}</span>
-          <ChevronRight className="size-3" />
-          <span className="text-ink">{page.title}</span>
-        </nav>
-      )}
-      <h1 className="t-display-sm text-ink">
-        {page.title}
-      </h1>
-      <p className="t-subtitle mt-md max-w-[58ch] text-graphite">
-        {page.description}
-      </p>
-      <div className="mt-xl border-t border-hairline" />
-    </header>
+    <>
+      {generated && <JsonLd data={techArticleSchema(generated)} />}
+      {generated && <JsonLd data={breadcrumbSchema(generated)} />}
+      <header className="mb-8">
+        {section && (
+          <nav
+            aria-label="Breadcrumb"
+            className="t-mono-caps mb-md flex items-center gap-1.5 text-graphite"
+          >
+            <span>Docs</span>
+            <ChevronRight className="size-3" />
+            <span>{section}</span>
+            <ChevronRight className="size-3" />
+            <span className="text-ink">{page.title}</span>
+          </nav>
+        )}
+        <h1 className="t-display-sm text-ink">{page.title}</h1>
+        <p className="t-subtitle mt-md max-w-[58ch] text-graphite">{page.description}</p>
+        <div className="mt-xl border-t border-hairline" />
+      </header>
+    </>
   );
 }

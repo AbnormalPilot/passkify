@@ -18,8 +18,7 @@ const buttonVariants = cva(
       variant: {
         /* The marketing CTA on dark sections: a white pill carrying a thin ink
            border that paints inside the fill and reads as a confident edge. */
-        primary:
-          'rounded-full border border-ink bg-canvas-light text-ink hover:bg-canvas-paper',
+        primary: 'rounded-full border border-ink bg-canvas-light text-ink hover:bg-canvas-paper',
         /* Its inverse, for light-section heroes. */
         'primary-on-light':
           'rounded-full border border-ink bg-ink text-on-primary hover:bg-ink-soft',
@@ -55,7 +54,9 @@ export interface ButtonProps
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild = false, ...props }, ref) => {
     const Comp = asChild ? Slot : 'button';
-    return <Comp className={cn(buttonVariants({ variant, size, className }))} ref={ref} {...props} />;
+    return (
+      <Comp className={cn(buttonVariants({ variant, size, className }))} ref={ref} {...props} />
+    );
   },
 );
 Button.displayName = 'Button';

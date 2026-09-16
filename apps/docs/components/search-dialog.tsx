@@ -4,7 +4,12 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search } from 'lucide-react';
 import {
-  CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
 } from '@/components/ui/command';
 import { docsNav } from '@/lib/nav';
 
@@ -63,7 +68,9 @@ export function SearchDialog() {
                 >
                   <div className="flex flex-col gap-0.5 py-0.5">
                     <span className="text-sm">{item.title}</span>
-                    <span className="line-clamp-1 text-xs text-muted-foreground">{item.description}</span>
+                    <span className="line-clamp-1 text-xs text-muted-foreground">
+                      {item.description}
+                    </span>
                   </div>
                 </CommandItem>
               ))}

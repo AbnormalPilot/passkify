@@ -5,32 +5,178 @@ on:
     branches: [main]
   pull_request:
 
+# A new push supersedes the run in flight; nothing here is worth finishing twice.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Turns on the GitHub Actions reporter in vitest.config.ts.
+  CI: 'true'
+
 jobs:
-  library:
-    name: library
+  lint:
+    name: Lint and format
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: 24, cache: npm }
       - run: npm ci
-      # The test files import the compiled output, so dist/ has to exist before
-      # anything type-checks it. `npm test` would build it, but that runs after.
+      - run: npx biome ci .
+
+  library:
+    name: Library (node ${{ matrix.node }} on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        # 20 is the floor: globalThis.crypto is unflagged from Node 19, and
+        # `engines` says >=20. Nothing tested any of these before.
+        node: ['20', '22', '24']
+        os: [ubuntu-latest]
+        include:
+          - { node: '24', os: macos-latest }
+          - { node: '24', os: windows-latest }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: '${{ matrix.node }}', cache: npm }
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck -w passkify
+      # Runs against src/ — no build needed, which is what makes the older
+      # Node rows possible at all.
+      - name: Unit tests
+        run: npm test -w passkify
+      # And then against the compiled output, ESM and CommonJS both.
+      - name: Tests against dist
+        run: npm run test:dist -w passkify
+
+  runtimes:
+    name: ${{ matrix.runtime }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # Deno is absent deliberately. The library itself runs there — it is
+        # pure WebCrypto — but the smoke test drives it with the virtual
+        # authenticator, which generates keys via node:crypto's
+        # `KeyObject.export({ format: 'jwk' })`, and Deno's Node compatibility
+        # layer does not implement that for EC keys. The blocker is the test
+        # double, not passkify. Re-add once the authenticator is on WebCrypto.
+        runtime: [bun]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
       - run: npm run build -w passkify
-      - run: npm run typecheck -w passkify
-      # `test` rebuilds dist/, so this also proves the published output compiles.
-      - run: npm test -w passkify
+
+      - if: matrix.runtime == 'bun'
+        uses: oven-sh/setup-bun@v2
+      - if: matrix.runtime == 'bun'
+        name: A full ceremony under Bun
+        working-directory: packages/passkify
+        run: bun test/smoke/runtime-smoke.mjs
+
+  package:
+    name: Package health
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - run: npm run build -w passkify
+      # Both run against the packed tarball, not the working tree, so a missing
+      # entry in `files` is caught as well as a bad `exports` map.
+      - name: publint
+        run: npx --yes publint ./packages/passkify
+      - name: Are the types wrong?
+        run: npx --yes @arethetypeswrong/cli --pack ./packages/passkify --profile node16 --ignore-rules no-resolution
+      - name: The library has no runtime dependencies
+        run: |
+          deps=$(node -p "JSON.stringify(require('./packages/passkify/package.json').dependencies ?? {})")
+          echo "dependencies: $deps"
+          test "$deps" = "{}" || { echo "::error::passkify must have zero runtime dependencies"; exit 1; }
+      - name: Generated files are in step with the source
+        run: |
+          npm run generate -w passkify
+          git diff --exit-code packages/passkify/generated skills \
+            || { echo "::error::generated files are stale — run 'npm run build -w passkify' and commit"; exit 1; }
+
+      - name: The CLI runs
+        run: |
+          node packages/passkify/bin/passkify.mjs --version
+          node packages/passkify/bin/passkify.mjs skills list > /dev/null
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+            | node packages/passkify/bin/passkify.mjs mcp | grep -q serverInfo
+
+      - name: Tarball size budget
+        run: |
+          cd packages/passkify
+          size=$(npm pack --dry-run --json | node -p "JSON.parse(require('node:fs').readFileSync(0,'utf8'))[0].unpackedSize")
+          echo "unpacked: $size bytes"
+          test "$size" -lt 1500000 || { echo "::error::tarball grew past 1.5 MB"; exit 1; }
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - run: npm run test:coverage -w passkify
+      - uses: codecov/codecov-action@v5
+        continue-on-error: true
+        with:
+          files: packages/passkify/coverage/lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   docs:
-    name: docs
+    name: Docs site
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: 24, cache: npm }
       - run: npm ci
       - run: npm run verify -w passkify-docs
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: github/codeql-action/init@v4
+        with: { languages: javascript-typescript, queries: security-extended }
+      - uses: github/codeql-action/analyze@v4
+
+  dependencies:
+    name: Dependency review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    timeout-minutes: 5
+    permissions: { contents: read, pull-requests: write }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure

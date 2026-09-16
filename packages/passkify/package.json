@@ -1,6 +1,6 @@
 {
   "name": "passkify",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Add passkeys (WebAuthn) to your website in a few lines. Zero runtime dependencies, client + server included.",
   "keywords": [
     "passkey",
@@ -10,7 +10,17 @@
     "authentication",
     "passwordless",
     "login",
-    "auth"
+    "auth",
+    "webauthn-server",
+    "passkey-server",
+    "conditional-ui",
+    "autofill",
+    "signal-api",
+    "related-origins",
+    "cloudflare-workers",
+    "edge",
+    "zero-dependencies",
+    "typescript"
   ],
   "license": "MIT",
   "repository": {
@@ -26,48 +36,260 @@
   "type": "module",
   "sideEffects": false,
   "engines": {
-    "node": ">=18"
+    "node": ">=20.0.0"
   },
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",
   "types": "./dist/esm/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/esm/index.d.ts",
-      "import": "./dist/esm/index.js",
-      "require": "./dist/cjs/index.js"
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.js"
+      }
     },
     "./server": {
-      "types": "./dist/esm/server/index.d.ts",
-      "import": "./dist/esm/server/index.js",
-      "require": "./dist/cjs/server/index.js"
+      "import": {
+        "types": "./dist/esm/server/index.d.ts",
+        "default": "./dist/esm/server/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/server/index.d.cts",
+        "default": "./dist/cjs/server/index.js"
+      }
     },
     "./client": {
-      "types": "./dist/esm/client/index.d.ts",
-      "import": "./dist/esm/client/index.js",
-      "require": "./dist/cjs/client/index.js"
+      "import": {
+        "types": "./dist/esm/client/index.d.ts",
+        "default": "./dist/esm/client/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/client/index.d.cts",
+        "default": "./dist/cjs/client/index.js"
+      }
+    },
+    "./react": {
+      "import": {
+        "types": "./dist/esm/react/index.d.ts",
+        "default": "./dist/esm/react/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/react/index.d.cts",
+        "default": "./dist/cjs/react/index.js"
+      }
+    },
+    "./testing": {
+      "import": {
+        "types": "./dist/esm/testing/index.d.ts",
+        "default": "./dist/esm/testing/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/testing/index.d.cts",
+        "default": "./dist/cjs/testing/index.js"
+      }
+    },
+    "./store-conformance": {
+      "import": {
+        "types": "./dist/esm/conformance/index.d.ts",
+        "default": "./dist/esm/conformance/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/conformance/index.d.cts",
+        "default": "./dist/cjs/conformance/index.js"
+      }
+    },
+    "./stores/postgres": {
+      "import": {
+        "types": "./dist/esm/stores/postgres.d.ts",
+        "default": "./dist/esm/stores/postgres.js"
+      },
+      "require": {
+        "types": "./dist/cjs/stores/postgres.d.cts",
+        "default": "./dist/cjs/stores/postgres.js"
+      }
+    },
+    "./stores/prisma": {
+      "import": {
+        "types": "./dist/esm/stores/prisma.d.ts",
+        "default": "./dist/esm/stores/prisma.js"
+      },
+      "require": {
+        "types": "./dist/cjs/stores/prisma.d.cts",
+        "default": "./dist/cjs/stores/prisma.js"
+      }
+    },
+    "./stores/redis": {
+      "import": {
+        "types": "./dist/esm/stores/redis.d.ts",
+        "default": "./dist/esm/stores/redis.js"
+      },
+      "require": {
+        "types": "./dist/cjs/stores/redis.d.cts",
+        "default": "./dist/cjs/stores/redis.js"
+      }
+    },
+    "./stores/mongodb": {
+      "import": {
+        "types": "./dist/esm/stores/mongodb.d.ts",
+        "default": "./dist/esm/stores/mongodb.js"
+      },
+      "require": {
+        "types": "./dist/cjs/stores/mongodb.d.cts",
+        "default": "./dist/cjs/stores/mongodb.js"
+      }
+    },
+    "./stores/sqlite": {
+      "import": {
+        "types": "./dist/esm/stores/sqlite.d.ts",
+        "default": "./dist/esm/stores/sqlite.js"
+      },
+      "require": {
+        "types": "./dist/cjs/stores/sqlite.d.cts",
+        "default": "./dist/cjs/stores/sqlite.js"
+      }
+    },
+    "./stores/schema": {
+      "import": {
+        "types": "./dist/esm/stores/schema.d.ts",
+        "default": "./dist/esm/stores/schema.js"
+      },
+      "require": {
+        "types": "./dist/cjs/stores/schema.d.cts",
+        "default": "./dist/cjs/stores/schema.js"
+      }
+    },
+    "./next": {
+      "import": {
+        "types": "./dist/esm/adapters/next.d.ts",
+        "default": "./dist/esm/adapters/next.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/next.d.cts",
+        "default": "./dist/cjs/adapters/next.js"
+      }
+    },
+    "./hono": {
+      "import": {
+        "types": "./dist/esm/adapters/hono.d.ts",
+        "default": "./dist/esm/adapters/hono.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/hono.d.cts",
+        "default": "./dist/cjs/adapters/hono.js"
+      }
+    },
+    "./fastify": {
+      "import": {
+        "types": "./dist/esm/adapters/fastify.d.ts",
+        "default": "./dist/esm/adapters/fastify.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/fastify.d.cts",
+        "default": "./dist/cjs/adapters/fastify.js"
+      }
+    },
+    "./sveltekit": {
+      "import": {
+        "types": "./dist/esm/adapters/sveltekit.d.ts",
+        "default": "./dist/esm/adapters/sveltekit.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/sveltekit.d.cts",
+        "default": "./dist/cjs/adapters/sveltekit.js"
+      }
+    },
+    "./remix": {
+      "import": {
+        "types": "./dist/esm/adapters/remix.d.ts",
+        "default": "./dist/esm/adapters/remix.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/remix.d.cts",
+        "default": "./dist/cjs/adapters/remix.js"
+      }
+    },
+    "./cloudflare": {
+      "import": {
+        "types": "./dist/esm/adapters/cloudflare.d.ts",
+        "default": "./dist/esm/adapters/cloudflare.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/cloudflare.d.cts",
+        "default": "./dist/cjs/adapters/cloudflare.js"
+      }
     },
     "./package.json": "./package.json"
   },
   "files": [
     "dist",
-    "src",
+    "bin",
+    "generated",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "scripts": {
-    "test": "npm run build && node --test test/*.test.ts",
+    "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "build": "node scripts/build.mjs",
     "prepublishOnly": "npm run build && npm run typecheck && npm test",
-    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\""
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:dist": "npm run build && PASSKIFY_TEST_TARGET=dist vitest run",
+    "generate": "node scripts/generate.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "@types/react": "^19.2.18",
+    "react": "^19.2.8",
     "typescript": "^5.7.2"
   },
   "publishConfig": {
     "access": "public",
     "provenance": true
+  },
+  "peerDependencies": {
+    "pg": "*",
+    "postgres": "*",
+    "ioredis": "*",
+    "redis": "*",
+    "mongodb": "*",
+    "@prisma/client": "*",
+    "better-sqlite3": "*",
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "pg": {
+      "optional": true
+    },
+    "postgres": {
+      "optional": true
+    },
+    "ioredis": {
+      "optional": true
+    },
+    "redis": {
+      "optional": true
+    },
+    "mongodb": {
+      "optional": true
+    },
+    "@prisma/client": {
+      "optional": true
+    },
+    "better-sqlite3": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
+  },
+  "bin": {
+    "passkify": "./bin/passkify.mjs"
   }
 }

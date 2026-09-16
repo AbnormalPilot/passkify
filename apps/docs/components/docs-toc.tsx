@@ -58,9 +58,7 @@ export function DocsToc() {
 
   return (
     <nav aria-label="On this page" className="text-sm">
-      <p className="t-mono-caps mb-sm border-b border-hairline pb-2 text-graphite">
-        On this page
-      </p>
+      <p className="t-mono-caps mb-sm border-b border-hairline pb-2 text-graphite">On this page</p>
       <ul className="space-y-1.5 border-l border-border">
         {headings.map((heading) => (
           <li key={heading.id} style={{ paddingLeft: heading.level === 3 ? '1.5rem' : '0.75rem' }}>

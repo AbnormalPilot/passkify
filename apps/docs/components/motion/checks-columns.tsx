@@ -19,7 +19,7 @@ const OFFSET = ['', 'lg:mt-xxl', 'lg:mt-lg'];
  * The checks are in source order and are numbered on screen, so the order has
  * to survive the layout. Consecutive runs read 01–05 down the first column and
  * 06–09 down the second, and — the reason it matters — when the columns stack
- * below `lg` they concatenate back into 01–13. A round-robin deal would read
+ * below `lg` they concatenate back into one unbroken run. A round-robin deal would read
  * correctly at one breakpoint and shuffle at every other.
  */
 function columnise<T>(items: T[], count: number): T[][] {
@@ -36,7 +36,7 @@ function columnise<T>(items: T[], count: number): T[][] {
 /**
  * The verification list, as three columns at different depths.
  *
- * Thirteen items is too many for a single vertical list and too few to hide
+ * Fifteen items is too many for a single vertical list and too few to hide
  * behind a "view all", and the point being made is breadth: that the checks
  * keep coming. Three columns put the whole set on screen at once, which is the
  * claim, and giving each column its own drift rate keeps the block from
@@ -49,7 +49,7 @@ function columnise<T>(items: T[], count: number): T[][] {
  * settled exactly when it is being read.
  *
  * Below 768px, and under `prefers-reduced-motion`, nothing moves: the columns
- * stack into one ordered list of thirteen cards.
+ * stack into one ordered list of fifteen cards.
  */
 export function ChecksColumns({
   eyebrow,

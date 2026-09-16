@@ -37,33 +37,69 @@ const codeTheme = {
   },
   tokenColors: [
     // 5.72:1
-    { scope: ['comment', 'punctuation.definition.comment'],
-      settings: { foreground: '#9a9a9a', fontStyle: 'italic' } },
+    {
+      scope: ['comment', 'punctuation.definition.comment'],
+      settings: { foreground: '#9a9a9a', fontStyle: 'italic' },
+    },
     // 7.84:1
-    { scope: ['string', 'string.quoted', 'constant.other.symbol', 'string.template'],
-      settings: { foreground: '#37cd84' } },
+    {
+      scope: ['string', 'string.quoted', 'constant.other.symbol', 'string.template'],
+      settings: { foreground: '#37cd84' },
+    },
     // 9.25:1
-    { scope: ['keyword', 'storage', 'storage.type', 'storage.modifier',
-              'keyword.control', 'keyword.operator.new', 'keyword.operator.expression'],
-      settings: { foreground: '#ffb38a' } },
+    {
+      scope: [
+        'keyword',
+        'storage',
+        'storage.type',
+        'storage.modifier',
+        'keyword.control',
+        'keyword.operator.new',
+        'keyword.operator.expression',
+      ],
+      settings: { foreground: '#ffb38a' },
+    },
     // 7.82:1
-    { scope: ['entity.name.function', 'support.function', 'meta.function-call',
-              'variable.function'],
-      settings: { foreground: '#55beff' } },
+    {
+      scope: [
+        'entity.name.function',
+        'support.function',
+        'meta.function-call',
+        'variable.function',
+      ],
+      settings: { foreground: '#55beff' },
+    },
     // 9.59:1
-    { scope: ['entity.name.type', 'entity.name.class', 'support.type', 'support.class',
-              'entity.other.inherited-class'],
-      settings: { foreground: '#f2c14e' } },
+    {
+      scope: [
+        'entity.name.type',
+        'entity.name.class',
+        'support.type',
+        'support.class',
+        'entity.other.inherited-class',
+      ],
+      settings: { foreground: '#f2c14e' },
+    },
     // 10.54:1
-    { scope: ['constant.numeric', 'constant.language', 'constant.character',
-              'support.constant'],
-      settings: { foreground: '#9ad9ff' } },
+    {
+      scope: ['constant.numeric', 'constant.language', 'constant.character', 'support.constant'],
+      settings: { foreground: '#9ad9ff' },
+    },
     // 12.90:1
-    { scope: ['variable', 'variable.other', 'meta.object-literal.key',
-              'support.variable', 'variable.parameter'],
-      settings: { foreground: '#e6e6e6' } },
-    { scope: ['punctuation', 'meta.brace', 'keyword.operator'],
-      settings: { foreground: '#9a9a9a' } },
+    {
+      scope: [
+        'variable',
+        'variable.other',
+        'meta.object-literal.key',
+        'support.variable',
+        'variable.parameter',
+      ],
+      settings: { foreground: '#e6e6e6' },
+    },
+    {
+      scope: ['punctuation', 'meta.brace', 'keyword.operator'],
+      settings: { foreground: '#9a9a9a' },
+    },
     { scope: ['entity.name.tag'], settings: { foreground: '#ffb38a' } },
     { scope: ['entity.other.attribute-name'], settings: { foreground: '#f2c14e' } },
   ],
@@ -121,6 +157,39 @@ const librarySource = join(repoRoot, 'packages/passkify/src/');
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          // An authentication library's own site should not be the weak link.
+          {
+            key: 'strict-transport-security',
+            value: 'max-age=63072000; includeSubDomains; preload',
+          },
+          { key: 'x-content-type-options', value: 'nosniff' },
+          { key: 'referrer-policy', value: 'strict-origin-when-cross-origin' },
+          // Defence in depth for the demo: the library refuses cross-origin
+          // ceremonies anyway, but framing this page should not be possible.
+          { key: 'x-frame-options', value: 'DENY' },
+          { key: 'content-security-policy', value: "frame-ancestors 'none'" },
+          {
+            key: 'permissions-policy',
+            value: 'publickey-credentials-create=(self), publickey-credentials-get=(self)',
+          },
+        ],
+      },
+    ];
+  },
+
+  async redirects() {
+    return [
+      { source: '/documentation', destination: '/docs', permanent: true },
+      { source: '/docs/index', destination: '/docs', permanent: true },
+      { source: '/llms', destination: '/llms.txt', permanent: false },
+    ];
+  },
+
   pageExtensions: ['ts', 'tsx', 'md', 'mdx'],
   // This app reads source from a sibling workspace package, so tracing has to
   // start at the repo root — both to find those files and to pick the single

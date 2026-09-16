@@ -26,8 +26,14 @@ import { resolveConfig } from './config.js';
 import { assertSupported, isAutofillAvailable } from './capabilities.js';
 import { createCredential, getAssertion } from './ceremony.js';
 import { request } from './transport.js';
-import type { ClientConfig, PasskeyClientResult } from './types.js';
-import type { RegistrationOptionsJSON, AuthenticationOptionsJSON } from '../shared/types.js';
+import { signalUnknownCredential } from './signals.js';
+import { PasskeyError } from '../shared/errors.js';
+import type { ClientConfig, PasskeyClientResult, ResolvedClientConfig } from './types.js';
+import type {
+  RegistrationOptionsJSON,
+  AuthenticationOptionsJSON,
+  AuthenticationResponseJSON,
+} from '../shared/types.js';
 
 // --- public surface --------------------------------------------------------
 
@@ -36,8 +42,18 @@ export {
   isSupported,
   isPlatformAuthenticatorAvailable,
   isAutofillAvailable,
+  getCapabilities,
 } from './capabilities.js';
 export { createCredential, getAssertion, cancelPendingCeremony } from './ceremony.js';
+
+/** Managing an account's passkeys. All three need a signed-in session. */
+export { listPasskeys, renamePasskey, deletePasskey, type PasskeySummary } from './credentials.js';
+
+/**
+ * WebAuthn Level 3 signal methods — what keeps the operating system's passkey
+ * picker in step with what your server actually has.
+ */
+export { syncPasskeys, getSignalSupport, type SyncResult } from './signals.js';
 
 export { PasskeyError, isPasskeyError } from '../shared/errors.js';
 export type { PasskeyErrorCode } from '../shared/errors.js';
@@ -52,6 +68,12 @@ export type {
 // --- the two calls you make ------------------------------------------------
 
 export interface RegisterInput {
+  /**
+   * `'conditional'` asks the browser to offer passkey creation inside its own
+   * UI rather than a modal — the way a site upgrades a password login to a
+   * passkey without an extra screen. Browsers without it show the usual prompt.
+   */
+  mediation?: CredentialMediationRequirement;
   /** Username for a new account. Omit when a signed-in user is adding a device. */
   username?: string;
   /** Shown in the OS passkey picker. Defaults to the username. */
@@ -77,7 +99,10 @@ export async function register(input: RegisterInput = {}): Promise<PasskeyClient
     displayName: input.displayName,
   });
 
-  const credential = await createCredential(options, input.signal);
+  const credential = await createCredential(options, {
+    signal: input.signal,
+    mediation: input.mediation,
+  });
 
   return request<PasskeyClientResult>(config, '/register/finish', credential);
 }
@@ -93,6 +118,34 @@ export interface LoginInput {
 }
 
 /** Sign in with a passkey. */
+/**
+ * Finish a login, and clean up after a stale passkey if the server rejects one.
+ *
+ * `unknown_credential` means the browser offered a passkey this site has no
+ * record of — almost always one the user deleted here but which still sits in
+ * their operating system's picker. Telling the platform is the whole reason
+ * `signalUnknownCredential` exists, and this is the only moment we know to.
+ */
+async function finishLogin(
+  config: ResolvedClientConfig,
+  assertion: AuthenticationResponseJSON,
+  rpId: string | undefined,
+): Promise<PasskeyClientResult> {
+  try {
+    return await request<PasskeyClientResult>(config, '/login/finish', assertion);
+  } catch (error) {
+    if (
+      rpId &&
+      config.signalUnknownCredentials !== false &&
+      error instanceof PasskeyError &&
+      error.code === 'unknown_credential'
+    ) {
+      await signalUnknownCredential(rpId, assertion.id);
+    }
+    throw error;
+  }
+}
+
 export async function login(input: LoginInput = {}): Promise<PasskeyClientResult> {
   assertSupported();
   const config = resolveConfig(input.config);
@@ -103,7 +156,7 @@ export async function login(input: LoginInput = {}): Promise<PasskeyClientResult
 
   const assertion = await getAssertion(options, { signal: input.signal });
 
-  return request<PasskeyClientResult>(config, '/login/finish', assertion);
+  return finishLogin(config, assertion, options.rpId);
 }
 
 export interface AutofillInput {
@@ -143,5 +196,5 @@ export async function signInWithAutofill(
     mediation: 'conditional',
   });
 
-  return request<PasskeyClientResult>(config, '/login/finish', assertion);
+  return finishLogin(config, assertion, options.rpId);
 }

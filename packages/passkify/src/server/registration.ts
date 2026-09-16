@@ -6,8 +6,10 @@
  * not expose, are noted where they are skipped rather than silently omitted.
  */
 
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { sha256 } from './crypto/digest.js';
+import { randomBytes, randomUUID } from './crypto/random.js';
 import { PasskeyError } from '../shared/errors.js';
+import { createTrace, type Trace, type CheckEvent } from '../shared/trace.js';
 import { toBase64Url, fromBase64Url, utf8ToBytes, bytesEqual } from '../shared/base64url.js';
 import type {
   RegistrationOptionsJSON,
@@ -108,9 +110,7 @@ export async function createRegistrationOptions(
 
   // Tell the authenticator which credentials it already holds for this account,
   // so it can refuse to create a duplicate instead of silently making a second.
-  const existingCredentials = isNewUser
-    ? []
-    : await config.store.listCredentialsByUserId(user.id);
+  const existingCredentials = isNewUser ? [] : await config.store.listCredentialsByUserId(user.id);
 
   const challenge = toBase64Url(randomBytes(config.challengeSize));
   const userVerification = input.userVerification ?? config.userVerification;
@@ -156,6 +156,11 @@ export async function createRegistrationOptions(
         : {}),
     },
     attestation: config.attestation,
+    // `credProps` is always asked for: it is how the browser reports whether
+    // the credential is actually discoverable, which is the difference between
+    // usernameless sign-in working and not.
+    extensions: { credProps: true, ...config.extensions },
+    ...(config.hints.length ? { hints: [...config.hints] } : {}),
   };
 
   return { options, userId: user.id, isNewUser };
@@ -167,13 +172,25 @@ export interface VerifyRegistrationResult {
   credential: PasskeyCredential;
   isNewUser: boolean;
   attestation: AttestationResult;
+  /**
+   * Every check the verifier ran, in order, with the outcome of each.
+   *
+   * Present only when the server was constructed with `explain: true`. It is
+   * what the documentation playground renders, and it is deliberately opt-in:
+   * a trace is a description of your verification path, and there is no reason
+   * to hand one to production traffic.
+   */
+  checks?: readonly CheckEvent[];
 }
 
 export async function verifyRegistration(
   config: ResolvedConfig,
   response: RegistrationResponseJSON,
 ): Promise<VerifyRegistrationResult> {
+  const trace: Trace = createTrace('registration', config.hooks.onCheck);
+
   assertRegistrationResponseShape(response);
+  trace.record('reg.response_well_formed', true);
 
   const clientDataBytes = decodeField(response.response.clientDataJSON, 'clientDataJSON');
   const clientData = parseClientData(clientDataBytes);
@@ -181,43 +198,64 @@ export async function verifyRegistration(
   // Step 1: find the ceremony this response belongs to. `takeChallenge`
   // consumes it, so a replay of these exact bytes finds nothing.
   const pending = await config.store.takeChallenge(clientData.challenge);
-  if (!pending) {
-    throw new PasskeyError(
-      'challenge_not_found',
-      'no pending registration matches this response — it may have expired, already been ' +
-        'used, or been issued by a different server process',
-    );
-  }
-  if (pending.kind !== 'registration') {
-    throw new PasskeyError('type_mismatch', 'that challenge was issued for a login, not a registration');
-  }
-  if (!challengeMatches(clientData.challenge, pending.challenge)) {
-    throw new PasskeyError('challenge_mismatch', 'the signed challenge is not the one we issued');
-  }
+  trace.assert(
+    'reg.challenge_found',
+    pending !== null,
+    () =>
+      new PasskeyError(
+        'challenge_not_found',
+        'no pending registration matches this response — it may have expired, already been ' +
+          'used, or been issued by a different server process',
+      ),
+  );
+  if (!pending) throw new PasskeyError('challenge_not_found', 'unreachable');
+  trace.assert(
+    'reg.challenge_kind',
+    pending.kind === 'registration',
+    () =>
+      new PasskeyError(
+        'type_mismatch',
+        'that challenge was issued for a login, not a registration',
+      ),
+  );
+  trace.assert(
+    'reg.challenge_matches',
+    challengeMatches(clientData.challenge, pending.challenge),
+    () => new PasskeyError('challenge_mismatch', 'the signed challenge is not the one we issued'),
+  );
 
   // Step 2: the ceremony type must be the one we asked for.
-  if (clientData.type !== 'webauthn.create') {
-    throw new PasskeyError(
-      'type_mismatch',
-      `expected clientData.type "webauthn.create", got "${clientData.type}"`,
-    );
-  }
+  trace.assert(
+    'reg.client_data_type',
+    clientData.type === 'webauthn.create',
+    () =>
+      new PasskeyError(
+        'type_mismatch',
+        `expected clientData.type "webauthn.create", got "${clientData.type}"`,
+      ),
+  );
 
   // Step 3: the origin must be one we serve.
-  if (!originAllowed(clientData.origin, config.origins)) {
-    throw new PasskeyError(
-      'origin_mismatch',
-      `origin "${clientData.origin}" is not in the allowed list. Add it to the \`origin\` ` +
-        `option — remember to include the scheme and port.`,
-    );
-  }
+  trace.assert(
+    'reg.origin_allowed',
+    originAllowed(clientData.origin, config.origins),
+    () =>
+      new PasskeyError(
+        'origin_mismatch',
+        `origin "${clientData.origin}" is not in the allowed list. Add it to the \`origin\` ` +
+          `option — remember to include the scheme and port.`,
+      ),
+  );
   // Step 4: refuse ceremonies run from inside a third-party iframe.
-  if (clientData.crossOrigin === true) {
-    throw new PasskeyError(
-      'origin_mismatch',
-      'this ceremony ran in a cross-origin frame, which passkify does not allow',
-    );
-  }
+  trace.assert(
+    'reg.not_cross_origin',
+    clientData.crossOrigin !== true,
+    () =>
+      new PasskeyError(
+        'origin_mismatch',
+        'this ceremony ran in a cross-origin frame, which passkify does not allow',
+      ),
+  );
 
   // Step 5: unpack the attestation object.
   const attestationObject = decodeField(response.response.attestationObject, 'attestationObject');
@@ -225,70 +263,96 @@ export async function verifyRegistration(
   const format = attestationMap.get('fmt');
   const statement = attestationMap.get('attStmt');
   const authDataBytes = attestationMap.get('authData');
-  if (typeof format !== 'string') {
-    throw new PasskeyError('parse_error', 'attestation object is missing "fmt"');
-  }
-  if (!(statement instanceof Map)) {
-    throw new PasskeyError('parse_error', 'attestation object is missing "attStmt"');
+  trace.assert(
+    'reg.attestation_object_shape',
+    typeof format === 'string' && statement instanceof Map && authDataBytes instanceof Uint8Array,
+    () =>
+      new PasskeyError(
+        'parse_error',
+        'the attestation object is missing "fmt", "attStmt" or "authData"',
+      ),
+  );
+  if (typeof format !== 'string' || !(statement instanceof Map)) {
+    throw new PasskeyError('parse_error', 'unreachable');
   }
   if (!(authDataBytes instanceof Uint8Array)) {
-    throw new PasskeyError('parse_error', 'attestation object is missing "authData"');
+    throw new PasskeyError('parse_error', 'unreachable');
   }
 
+  // Parsing the flags enforces reg.backup_flags_consistent, which lives in the
+  // authenticator-data reader because that is where the bytes are.
   const authData = parseAuthenticatorData(authDataBytes);
+  trace.record('reg.backup_flags_consistent', true);
 
   // Step 6: the authenticator must have signed for our Relying Party ID.
-  const expectedRpIdHash = new Uint8Array(createHash('sha256').update(config.rpID).digest());
-  if (!bytesEqual(authData.rpIdHash, expectedRpIdHash)) {
-    throw new PasskeyError(
-      'rpid_mismatch',
-      `this credential was created for a different Relying Party ID than "${config.rpID}". ` +
-        `Check that rpID matches the domain the page is served from.`,
-    );
-  }
+  const expectedRpIdHash = await sha256(utf8ToBytes(config.rpID));
+  trace.assert(
+    'reg.rp_id_hash',
+    bytesEqual(authData.rpIdHash, expectedRpIdHash),
+    () =>
+      new PasskeyError(
+        'rpid_mismatch',
+        `this credential was created for a different Relying Party ID than "${config.rpID}". ` +
+          `Check that rpID matches the domain the page is served from.`,
+      ),
+  );
 
   // Step 7: presence and verification flags.
-  if (!authData.flags.userPresent) {
-    throw new PasskeyError('user_not_present', 'the user-present flag was not set');
-  }
+  trace.assert(
+    'reg.user_present',
+    authData.flags.userPresent,
+    () => new PasskeyError('user_not_present', 'the user-present flag was not set'),
+  );
   const requiredUserVerification =
     (pending.context?.userVerification as UserVerificationRequirementName | undefined) ??
     config.userVerification;
-  if (requiredUserVerification === 'required' && !authData.flags.userVerified) {
-    throw new PasskeyError(
-      'user_not_verified',
-      'user verification was required but the authenticator only reported presence',
-    );
-  }
+  trace.assert(
+    'reg.user_verified',
+    requiredUserVerification !== 'required' || authData.flags.userVerified,
+    () =>
+      new PasskeyError(
+        'user_not_verified',
+        'user verification was required but the authenticator only reported presence',
+      ),
+  );
 
   // Step 8: a registration must carry attested credential data.
   const attested = authData.attestedCredentialData;
-  if (!authData.flags.attestedCredentialData || !attested) {
-    throw new PasskeyError('parse_error', 'the response contains no attested credential data');
-  }
+  trace.assert(
+    'reg.attested_data_present',
+    Boolean(authData.flags.attestedCredentialData && attested),
+    () => new PasskeyError('parse_error', 'the response contains no attested credential data'),
+  );
+  if (!attested) throw new PasskeyError('parse_error', 'unreachable');
 
   const credentialId = toBase64Url(attested.credentialId);
   const rawId = decodeField(response.rawId, 'rawId');
-  if (!bytesEqual(attested.credentialId, rawId)) {
-    throw new PasskeyError(
-      'malformed_response',
-      'rawId does not match the credential ID inside the authenticator data',
-    );
-  }
+  trace.assert(
+    'reg.raw_id_matches',
+    bytesEqual(attested.credentialId, rawId),
+    () =>
+      new PasskeyError(
+        'malformed_response',
+        'rawId does not match the credential ID inside the authenticator data',
+      ),
+  );
 
   // Step 9: we must be able to verify signatures from this key later.
-  const publicKey = parseCOSEPublicKey(attested.credentialPublicKey);
-  if (!config.supportedAlgorithms.includes(publicKey.alg)) {
-    throw new PasskeyError(
-      'unsupported_algorithm',
-      `the authenticator used ${algorithmName(publicKey.alg) ?? publicKey.alg}, which was not ` +
-        `among the algorithms offered`,
-    );
-  }
+  const publicKey = await parseCOSEPublicKey(attested.credentialPublicKey);
+  trace.assert(
+    'reg.algorithm_offered',
+    config.supportedAlgorithms.includes(publicKey.alg),
+    () =>
+      new PasskeyError(
+        'unsupported_algorithm',
+        `the authenticator used ${algorithmName(publicKey.alg) ?? publicKey.alg}, which was not ` +
+          `among the algorithms offered`,
+      ),
+  );
 
   // Step 10: the attestation statement, if the authenticator sent one.
-  const clientDataHash = new Uint8Array(createHash('sha256').update(clientDataBytes).digest());
-  const attestation = verifyAttestation({
+  const clientDataHash = await sha256(clientDataBytes);
+  const attestation = await verifyAttestation({
     format,
     statement,
     authenticatorData: authData,
@@ -297,19 +361,28 @@ export async function verifyRegistration(
     credentialId: attested.credentialId,
     aaguid: attested.aaguid,
     rootCertificates: config.attestationRootCertificates,
+    requested: config.attestation,
   });
+  // verifyAttestation throws on an inconsistent statement, so reaching here is
+  // the pass.
+  trace.record('reg.attestation_statement', true);
 
-  if (config.requireBackupEligible && !authData.flags.backupEligible) {
-    throw new PasskeyError(
-      'attestation_failed',
-      'this authenticator cannot back up or sync the credential, which this site requires',
-    );
-  }
+  trace.assert(
+    'reg.backup_eligible_required',
+    !config.requireBackupEligible || authData.flags.backupEligible,
+    () =>
+      new PasskeyError(
+        'attestation_failed',
+        'this authenticator cannot back up or sync the credential, which this site requires',
+      ),
+  );
 
   // Step 11: refuse to register the same credential twice, for anyone.
-  if (await config.store.getCredentialById(credentialId)) {
-    throw new PasskeyError('credential_exists', 'that passkey is already registered');
-  }
+  trace.assert(
+    'reg.credential_unique',
+    (await config.store.getCredentialById(credentialId)) === null,
+    () => new PasskeyError('credential_exists', 'that passkey is already registered'),
+  );
 
   // Everything checks out — now, and only now, materialise the account.
   let user: PasskeyUser | null;
@@ -343,7 +416,14 @@ export async function verifyRegistration(
   await config.store.createCredential(credential);
   await config.hooks.onRegistered?.({ user, credential, isNewUser });
 
-  return { verified: true, user, credential, isNewUser, attestation };
+  return {
+    verified: true,
+    user,
+    credential,
+    isNewUser,
+    attestation,
+    ...(config.explain ? { checks: trace.events } : {}),
+  };
 }
 
 const KNOWN_TRANSPORTS = new Set<string>([
@@ -392,7 +472,9 @@ function decodeField(value: unknown, name: string): Uint8Array {
   }
 }
 
-function assertRegistrationResponseShape(value: unknown): asserts value is RegistrationResponseJSON {
+function assertRegistrationResponseShape(
+  value: unknown,
+): asserts value is RegistrationResponseJSON {
   const response = value as RegistrationResponseJSON | undefined;
   if (
     !response ||
@@ -405,7 +487,7 @@ function assertRegistrationResponseShape(value: unknown): asserts value is Regis
     throw new PasskeyError(
       'malformed_response',
       'that is not a registration response. Send the object returned by passkify/client ' +
-        "`register()` — or `credential.toJSON()` — as the request body.",
+        '`register()` — or `credential.toJSON()` — as the request body.',
     );
   }
 }

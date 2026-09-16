@@ -1,13 +1,23 @@
 /**
  * The landing page's content, kept out of the page component.
  *
- * Everything here is checkable against the source. The error codes are the
- * ones `PasskeyErrorCode` actually declares, the checks are the ones
- * `verifyAuthentication` actually performs in the order it performs them, and
- * the runtime list is drawn from what the adapters and `node:crypto` usage
- * genuinely support. Nothing on this page claims an adoption number, a
- * contributor count or a customer, because there are none to claim yet.
+ * The figures and the check list are imported from `lib/generated/stats.json`,
+ * which `scripts/build-content.mjs` derives from the library's own manifest,
+ * check registry, error registry and bundled bytes. They were transcribed by
+ * hand once and every one of them had drifted by the time anyone noticed, on a
+ * page whose whole argument is that the reader can check it. Prose that names
+ * a count reads it from the same place.
+ *
+ * Nothing here claims an adoption number, a contributor count or a customer,
+ * because there are none to claim yet.
  */
+
+import stats from '@/lib/generated/stats.json';
+
+export const STATS = stats;
+
+/** Bytes as the reader would see them quoted, e.g. `3.6`. */
+const kb = (bytes: number) => Number((bytes / 1024).toFixed(1));
 
 export interface Measure {
   label: string;
@@ -20,24 +30,24 @@ export interface Measure {
 export const MEASURES: Measure[] = [
   {
     label: 'Runtime dependencies',
-    value: 0,
+    value: stats.runtimeDependencies,
     note: 'The install tree is this package and nothing else.',
   },
   {
-    label: 'Tests',
-    value: 92,
-    note: 'Most of them feed the verifier tampered input and expect a throw.',
+    label: 'Verification checks',
+    value: stats.checks.total,
+    note: `${stats.checks.registration} on registration and ${stats.checks.authentication} on login, each one a registered assertion in the source.`,
   },
   {
-    label: 'Checks per ceremony pair',
-    value: 29,
-    note: 'Counted across registration and authentication together.',
+    label: 'Typed error codes',
+    value: stats.errorCodes,
+    note: 'Every failure arrives as one of these, with an HTTP status attached.',
   },
   {
-    label: 'Kilobytes in the browser',
-    value: 6.5,
+    label: 'Kilobytes over the wire',
+    value: kb(stats.client.gzippedBytes),
     decimals: 1,
-    note: 'The client half, minified. The verifier never ships to a user.',
+    note: 'The client half, minified and compressed. The verifier never ships to a user.',
   },
 ];
 
@@ -67,7 +77,7 @@ const user = await login();`,
   },
   {
     label: 'Verification',
-    title: 'Fourteen checks, in order',
+    title: `${stats.checks.authentication} checks, in order`,
     body: 'Origin, domain binding, challenge, flags, signature, counter. Any one of them failing throws a typed error. There is no result object with a boolean on it that a caller can forget to read.',
     file: 'server.ts',
     code: `try {
@@ -93,24 +103,16 @@ const user = await login();`,
 ];
 
 /**
- * The authentication checks, in source order. Each `code` is a real member of
- * `PasskeyErrorCode`, thrown at that point in `verifyAuthentication`.
+ * The authentication checks, in the order `verifyAuthentication` runs them.
+ *
+ * Read from the generated registry, so the list on the page is the list the
+ * verifier actually walks: adding a check to the server adds a card here, and
+ * there is no second copy to forget.
  */
-export const CHECKS = [
-  { code: 'challenge_not_found', claim: 'The challenge exists and has not expired.' },
-  { code: 'type_mismatch', claim: 'The client data says webauthn.get, not webauthn.create.' },
-  { code: 'challenge_mismatch', claim: 'The signed challenge is the one this server issued.' },
-  { code: 'origin_mismatch', claim: 'The origin is one of the origins you configured.' },
-  { code: 'unknown_credential', claim: 'The credential ID is registered here.' },
-  { code: 'malformed_response', claim: 'The user handle decodes as base64url UTF-8.' },
-  { code: 'unknown_credential', claim: 'The credential belongs to the account claiming it.' },
-  { code: 'rpid_mismatch', claim: 'The RP ID hash matches your domain, not a neighbour of it.' },
-  { code: 'user_not_present', claim: 'The user-present flag is set on the authenticator data.' },
-  { code: 'user_not_verified', claim: 'The human was verified when your config required it.' },
-  { code: 'bad_signature', claim: 'The signature verifies against the stored public key.' },
-  { code: 'unknown_user', claim: 'The account that owns the passkey still exists.' },
-  { code: 'counter_regression', claim: 'The signature counter has not moved backwards.' },
-];
+export const CHECKS = stats.checkList.authentication.map((check) => ({
+  code: check.code,
+  claim: check.title,
+}));
 
 export interface Support {
   slug: string;
@@ -140,7 +142,6 @@ export const RUNTIMES: Support[] = [
     slug: 'cloudflareworkers',
     name: 'Workers',
     href: '/docs/guides/frameworks#cloudflare-workers',
-    caveat: 'nodejs_compat',
   },
 ];
 

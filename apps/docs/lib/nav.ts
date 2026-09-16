@@ -27,7 +27,8 @@ export const docsNav: NavSection[] = [
       {
         title: 'Introduction',
         href: '/docs',
-        description: 'What passkify does, what it deliberately does not do, and how the pieces fit.',
+        description:
+          'What passkify does, what it deliberately does not do, and how the pieces fit.',
       },
       {
         title: 'Installation',
@@ -37,7 +38,8 @@ export const docsNav: NavSection[] = [
       {
         title: 'Quickstart',
         href: '/docs/quickstart',
-        description: 'A working passwordless sign-up and sign-in, end to end, in about five minutes.',
+        description:
+          'A working passwordless sign-up and sign-in, end to end, in about five minutes.',
       },
       {
         title: 'How passkeys work',
@@ -67,12 +69,14 @@ export const docsNav: NavSection[] = [
       {
         title: 'Registration',
         href: '/docs/server/registration',
-        description: 'startRegistration and finishRegistration, and the fifteen checks in between.',
+        description:
+          'startRegistration and finishRegistration, and the eighteen checks in between.',
       },
       {
         title: 'Authentication',
         href: '/docs/server/authentication',
-        description: 'startAuthentication and finishAuthentication, usernameless and username-first.',
+        description:
+          'startAuthentication and finishAuthentication, usernameless and username-first.',
       },
       {
         title: 'Credential management',
@@ -92,7 +96,8 @@ export const docsNav: NavSection[] = [
       {
         title: 'Client API',
         href: '/docs/client',
-        description: 'register, login, autofill, capability detection, and the low-level ceremony calls.',
+        description:
+          'register, login, autofill, capability detection, and the low-level ceremony calls.',
       },
     ],
   },
@@ -143,7 +148,8 @@ export const docsNav: NavSection[] = [
       {
         title: 'Adding to an existing app',
         href: '/docs/guides/existing-app',
-        description: 'Staged rollout alongside passwords, without opening an account-takeover hole.',
+        description:
+          'Staged rollout alongside passwords, without opening an account-takeover hole.',
       },
       {
         title: 'Security model',
@@ -206,7 +212,7 @@ export function getSectionTitle(pathname: string): string | null {
  * needs is under /docs, and these point at the source and the registry only.
  */
 export const siteLinks = {
-  github: 'https://github.com/USER/passkify',
+  github: 'https://github.com/AbnormalPilot/passkify',
   npm: 'https://www.npmjs.com/package/passkify',
 };
 
@@ -228,10 +234,7 @@ export const footerNav: NavSection[] = [
   },
   {
     title: 'Reference',
-    items: [
-      ...docsNav[1].items.slice(0, 3),
-      ...docsNav[4].items.slice(0, 2),
-    ],
+    items: [...docsNav[1].items.slice(0, 3), ...docsNav[4].items.slice(0, 2)],
   },
   {
     title: 'Guides',

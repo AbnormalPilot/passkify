@@ -3,7 +3,16 @@
   "compilerOptions": {
     "noEmit": true,
     "noUnusedLocals": false,
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "types": ["node", "vitest/globals"],
+    // Mirrors the aliases in vitest.config.ts. Tests import the package the way
+    // a user does, and both the checker and the runner resolve that to src/.
+    "paths": {
+      "passkify": ["./src/index.ts"],
+      "passkify/server": ["./src/server/index.ts"],
+      "passkify/client": ["./src/client/index.ts"],
+      "#internal/*": ["./src/*"]
+    }
   },
-  "include": ["test/**/*.ts"]
+  "include": ["test/**/*.ts", "vitest.config.ts"]
 }

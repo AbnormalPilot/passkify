@@ -1,7 +1,11 @@
-export const metadata = {
+import { buildMetadata } from '@/lib/metadata';
+
+export const metadata = buildMetadata({
+  route: '/docs/types',
   title: 'Types',
-  description: 'Every exported interface and type alias.',
-};
+  description:
+    'Every exported interface and type alias.',
+});
 
 Everything exported from `passkify` and `passkify/client`. All of it ships with
 the package; there is no separate `@types` install.

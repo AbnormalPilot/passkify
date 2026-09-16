@@ -4,7 +4,8 @@
   "description": "Monorepo for the passkify library and its documentation site.",
   "license": "MIT",
   "engines": {
-    "node": ">=18"
+    "node": ">=20.19.0",
+    "npm": ">=10"
   },
   "workspaces": [
     "packages/*",
@@ -15,8 +16,17 @@
     "build": "npm run build -w passkify",
     "build:docs": "npm run build -w passkify-docs",
     "test": "npm test -w passkify",
+    "test:watch": "npm run test:watch -w passkify",
     "typecheck": "npm run typecheck -w passkify && npm run typecheck -w passkify-docs",
-    "verify": "npm run verify -w passkify-docs",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "verify": "npm run lint && npm run typecheck && npm test && npm run verify -w passkify-docs",
     "release": "npm publish -w passkify"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.12",
+    "@vitest/coverage-v8": "^5.0.0",
+    "vitest": "^5.0.0"
   }
 }

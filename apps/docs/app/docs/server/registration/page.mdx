@@ -1,7 +1,11 @@
-export const metadata = {
+import { buildMetadata } from '@/lib/metadata';
+
+export const metadata = buildMetadata({
+  route: '/docs/server/registration',
   title: 'Registration',
-  description: 'startRegistration and finishRegistration, and the fifteen checks in between.',
-};
+  description:
+    'startRegistration and finishRegistration, and the eighteen checks in between.',
+});
 
 Creating a passkey. Two calls: one to issue options, one to verify what comes
 back.
@@ -169,30 +173,14 @@ result.attestation.format; // 'none' for most consumer passkeys
 
 </ApiMethod>
 
-### The fifteen checks
+### The checks
 
-In WebAuthn §7.1 order. Each one has a test that tampers with exactly that
-field and asserts the matching code.
+Each one has a test that tampers with exactly that field and asserts the
+matching code.
 
-| # | Check | Failure code |
-| --- | --- | --- |
-| 1 | Challenge exists, unexpired, consumed on read | `challenge_not_found` |
-| 2 | Challenge was issued for a registration | `type_mismatch` |
-| 3 | Signed challenge equals the issued one, compared in constant time | `challenge_mismatch` |
-| 4 | `clientData.type` is `webauthn.create` | `type_mismatch` |
-| 5 | `clientData.origin` is allowed | `origin_mismatch` |
-| 6 | Not run inside a cross-origin frame | `origin_mismatch` |
-| 7 | `rpIdHash` equals SHA-256 of the configured `rpID` | `rpid_mismatch` |
-| 8 | User-present flag set | `user_not_present` |
-| 9 | User-verified flag set, when required | `user_not_verified` |
-| 10 | Backup-state flag not set without backup-eligible | `parse_error` |
-| 11 | Attested credential data present and well formed | `parse_error` |
-| 12 | `rawId` matches the credential ID inside the authenticator data | `malformed_response` |
-| 13 | Public key parses and its algorithm was offered | `unsupported_algorithm` |
-| 14 | Attestation statement verifies, if one was sent | `attestation_failed` |
-| 15 | Credential ID is not already registered to anyone | `credential_exists` |
+<ChecksTable ceremony="registration" />
 
-<Reason title="Why check 15 spans all users, not just this one">
+<Reason title="Why the last check spans all users, not just this one">
 A credential ID is globally unique by construction. If one arrives that is
 already in your database under a different account, something is wrong that a
 per-user check would miss entirely: a replayed registration, a store bug, or a

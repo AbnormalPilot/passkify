@@ -1,7 +1,11 @@
-export const metadata = {
+import { buildMetadata } from '@/lib/metadata';
+
+export const metadata = buildMetadata({
+  route: '/docs/server/configuration',
   title: 'Configuration',
-  description: 'Every option on PasskeyServerConfig, what it changes, and when to move it.',
-};
+  description:
+    'Every option on PasskeyServerConfig, what it changes, and when to move it.',
+});
 
 ```js
 const passkeys = new PasskeyServer({

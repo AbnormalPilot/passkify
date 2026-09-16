@@ -1,11 +1,9 @@
-import * as React from 'react';
+import type * as React from 'react';
 
 /** Numbered sequence, for guides where order is the content. */
 
 export function Steps({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="ml-3 border-l border-hairline pl-7 [counter-reset:step]">{children}</div>
-  );
+  return <div className="ml-3 border-l border-hairline pl-7 [counter-reset:step]">{children}</div>;
 }
 
 export function Step({ title, children }: { title: string; children: React.ReactNode }) {

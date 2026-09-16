@@ -11,6 +11,9 @@
  */
 
 import { PasskeyError } from '../shared/errors.js';
+import { isSupportedAlgorithm } from './crypto/cose.js';
+import type { CheckObserver } from '../shared/trace.js';
+import { buildRelatedOrigins, type RelatedOriginsConfig } from './related-origin.js';
 import {
   DEFAULT_PUB_KEY_CRED_PARAMS,
   type AttestationConveyancePreferenceName,
@@ -85,6 +88,51 @@ export interface PasskeyServerConfig {
    */
   attestation?: AttestationConveyancePreferenceName;
 
+  /**
+   * Return the full list of checks each ceremony ran, on the verification
+   * result, and call `hooks.onCheck` as each one is decided.
+   *
+   * For documentation, debugging and teaching. Off by default and worth leaving
+   * off in production: a trace describes your verification path, and there is
+   * no reason to hand one to arbitrary callers.
+   */
+  explain?: boolean;
+
+  /**
+   * Steer the browser's UI toward a kind of authenticator (WebAuthn Level 3).
+   *
+   * `'client-device'` for the platform authenticator, `'security-key'` for a
+   * roaming key, `'hybrid'` for a phone. A *hint*, not a constraint — the
+   * browser may ignore it, and `authenticatorAttachment` is the thing that
+   * actually restricts what is accepted.
+   */
+  hints?: readonly ('security-key' | 'client-device' | 'hybrid')[];
+
+  /**
+   * WebAuthn extensions to request on every ceremony.
+   *
+   * `credProps` is requested automatically. `prf` is the interesting one — it
+   * derives a stable secret from the passkey, which is how a site builds
+   * end-to-end encryption on top of one. If you use it, design the recovery
+   * path first: a user with one authenticator and no escrow who loses it has
+   * lost the data, not just the login.
+   */
+  extensions?: Record<string, unknown>;
+
+  /**
+   * Publish `/.well-known/webauthn` so one passkey works across your other
+   * domains (WebAuthn Level 3 Related Origin Requests).
+   *
+   * The list is derived from `origin` — there is deliberately no second list to
+   * keep in sync, because a file that disagrees with the server fails silently
+   * and only in one direction. Every `origin` entry must therefore be a plain
+   * string; a RegExp or predicate is refused here.
+   *
+   * Browsers stop after five distinct registrable labels. Pass
+   * `{ labels: [...] }` if passkify cannot work yours out from the hostnames.
+   */
+  relatedOrigins?: boolean | RelatedOriginsConfig;
+
   /** Root certificates to validate attestation chains against. */
   attestationRootCertificates?: readonly (string | Uint8Array)[];
 
@@ -138,6 +186,16 @@ export interface PasskeyHooks {
     storedCounter: number;
     presentedCounter: number;
   }) => boolean | Promise<boolean>;
+
+  /**
+   * Called as each verification check is decided, in order, pass or fail.
+   *
+   * The `id` is a `VERIFICATION_CHECKS` entry, so a consumer can join against
+   * the registry for the title, the specification reference and the
+   * consequence. Synchronous and never awaited — it must not slow a ceremony
+   * down, and it must not throw.
+   */
+  onCheck?: CheckObserver;
 }
 
 /** Config with every default filled in. */
@@ -151,6 +209,10 @@ export interface ResolvedConfig {
   authenticatorAttachment?: AttachmentName;
   attestation: AttestationConveyancePreferenceName;
   attestationRootCertificates: readonly (string | Uint8Array)[];
+  explain: boolean;
+  relatedOrigins: RelatedOriginsConfig | null;
+  hints: readonly string[];
+  extensions: Record<string, unknown>;
   timeout: number;
   challengeTimeout: number;
   challengeSize: number;
@@ -238,15 +300,38 @@ export function resolveConfig(config: PasskeyServerConfig): ResolvedConfig {
     );
   }
 
-  for (const url of stringOrigins) {
-    if (!isRegistrableSuffix(url.hostname, rpID)) {
+  // Normally every origin must sit under the rpID — that constraint is what
+  // stops a credential minted for one site being accepted by another.
+  //
+  // Related Origin Requests are the specification's own exception to it: the
+  // whole point is that `example.de` can use a credential scoped to
+  // `example.com`. So when they are enabled, at least one origin must still be
+  // under the rpID (otherwise the rpID belongs to nobody), and the rest are
+  // the related ones, published for the browser to check against.
+  const relatedOriginsEnabled =
+    config.relatedOrigins !== undefined && config.relatedOrigins !== false;
+  const underRpID = stringOrigins.filter((url) => isRegistrableSuffix(url.hostname, rpID));
+
+  if (relatedOriginsEnabled) {
+    if (underRpID.length === 0) {
       configError(
-        `rpID "${rpID}" is not valid for origin "${url.origin}". The rpID must be the origin's ` +
-          `host or one of its parent domains. For this origin, use rpID "${url.hostname}"` +
-          (url.hostname.split('.').length > 2
-            ? ` or a parent such as "${url.hostname.split('.').slice(-2).join('.')}".`
-            : '.'),
+        `rpID "${rpID}" does not match any configured origin. With relatedOrigins enabled the ` +
+          `rpID still has to belong to one of them — usually your primary domain — and the ` +
+          `others are the related origins published to /.well-known/webauthn.`,
       );
+    }
+  } else {
+    for (const url of stringOrigins) {
+      if (!isRegistrableSuffix(url.hostname, rpID)) {
+        configError(
+          `rpID "${rpID}" is not valid for origin "${url.origin}". The rpID must be the origin's ` +
+            `host or one of its parent domains. For this origin, use rpID "${url.hostname}"` +
+            (url.hostname.split('.').length > 2
+              ? ` or a parent such as "${url.hostname.split('.').slice(-2).join('.')}".`
+              : '.') +
+            ` If these are genuinely different domains you own, enable relatedOrigins.`,
+        );
+      }
     }
   }
 
@@ -260,6 +345,24 @@ export function resolveConfig(config: PasskeyServerConfig): ResolvedConfig {
   if (supportedAlgorithms.length === 0) {
     configError('supportedAlgorithms cannot be empty');
   }
+  // Offering an algorithm we cannot verify is worse than not offering it: the
+  // credential registers, and then every login with it fails forever. Better to
+  // refuse at construction, where the message is readable and nobody is locked
+  // out yet.
+  //
+  // RS1 (-65535, RSA with SHA-1) reaches this since 1.0. It used to be
+  // verifiable, which meant a site could opt into SHA-1 signature checking.
+  for (const alg of supportedAlgorithms) {
+    if (!isSupportedAlgorithm(alg)) {
+      const name =
+        alg === -65535 ? 'RS1 (RSA with SHA-1), which passkify no longer verifies' : `${alg}`;
+      configError(
+        `supportedAlgorithms contains ${name}. ` +
+          'Remove it — an algorithm passkify cannot verify would register credentials ' +
+          'that can never be used to sign in.',
+      );
+    }
+  }
 
   return {
     rpName: config.rpName,
@@ -269,6 +372,15 @@ export function resolveConfig(config: PasskeyServerConfig): ResolvedConfig {
     userVerification: config.userVerification ?? 'preferred',
     residentKey: config.residentKey ?? 'preferred',
     authenticatorAttachment: config.authenticatorAttachment,
+    explain: config.explain ?? false,
+    hints: config.hints ?? [],
+    extensions: config.extensions ?? {},
+    relatedOrigins:
+      config.relatedOrigins === true
+        ? {}
+        : config.relatedOrigins === false || config.relatedOrigins === undefined
+          ? null
+          : config.relatedOrigins,
     attestation: config.attestation ?? 'none',
     attestationRootCertificates: config.attestationRootCertificates ?? [],
     timeout: config.timeout ?? 60_000,
@@ -278,4 +390,17 @@ export function resolveConfig(config: PasskeyServerConfig): ResolvedConfig {
     requireBackupEligible: config.requireBackupEligible ?? false,
     hooks: config.hooks ?? {},
   };
+}
+
+/**
+ * Checks that cannot run until the whole config is resolved.
+ *
+ * Kept separate so `resolveConfig` stays a pure translation, and called from
+ * the `PasskeyServer` constructor — the point is that these fail while someone
+ * is looking at a terminal, not on a browser's first `/.well-known` fetch.
+ */
+export function assertResolvedConfig(resolved: ResolvedConfig): void {
+  if (resolved.relatedOrigins) {
+    buildRelatedOrigins(resolved.rpID, resolved.origins, resolved.relatedOrigins);
+  }
 }

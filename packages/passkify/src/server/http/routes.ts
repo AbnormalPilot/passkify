@@ -18,6 +18,7 @@
 
 import { PasskeyError } from '../../shared/errors.js';
 import type { PasskeyServer } from '../passkey-server.js';
+import { WELL_KNOWN_WEBAUTHN_PATH } from '../related-origin.js';
 import type { VerifyRegistrationResult } from '../registration.js';
 import type { VerifyAuthenticationResult } from '../authentication.js';
 
@@ -25,6 +26,13 @@ export interface NormalizedRequest {
   method: string;
   /** Path relative to the mount point, always starting with `/`. */
   path: string;
+  /**
+   * The absolute request path.
+   *
+   * `/.well-known/webauthn` is fixed by the specification and cannot be moved
+   * under `basePath`, so the dispatcher has to see the real path to serve it.
+   */
+  pathname?: string;
   body: unknown;
   /** The authenticated account, if the adapter was given a session resolver. */
   sessionUserId: string | null;
@@ -32,7 +40,7 @@ export interface NormalizedRequest {
 
 export type RouteOutcome =
   | { kind: 'not-found' }
-  | { kind: 'json'; status: number; body: unknown }
+  | { kind: 'json'; status: number; body: unknown; cache?: string }
   | { kind: 'registered'; status: number; body: unknown; result: VerifyRegistrationResult }
   | { kind: 'authenticated'; status: number; body: unknown; result: VerifyAuthenticationResult };
 
@@ -58,11 +66,7 @@ function asObject(body: unknown): Record<string, unknown> {
  */
 function unwrapCeremonyResponse(body: unknown): unknown {
   const object = asObject(body);
-  if (
-    typeof object.rawId !== 'string' &&
-    object.response &&
-    typeof object.response === 'object'
-  ) {
+  if (typeof object.rawId !== 'string' && object.response && typeof object.response === 'object') {
     return object.response;
   }
   return body;
@@ -70,11 +74,9 @@ function unwrapCeremonyResponse(body: unknown): unknown {
 
 function requireSession(request: NormalizedRequest): string {
   if (!request.sessionUserId) {
-    throw new PasskeyError(
-      'unknown_user',
-      'you must be signed in to manage passkeys',
-      { status: 401 },
-    );
+    throw new PasskeyError('unknown_user', 'you must be signed in to manage passkeys', {
+      status: 401,
+    });
   }
   return request.sessionUserId;
 }
@@ -84,6 +86,15 @@ export async function dispatch(
   request: NormalizedRequest,
 ): Promise<RouteOutcome> {
   const { method, path } = request;
+
+  // Checked before anything else, because it is an absolute path rather than
+  // one relative to the mount point, and the adapters 404 anything outside
+  // their mount.
+  if (method === 'GET' && request.pathname === WELL_KNOWN_WEBAUTHN_PATH) {
+    const body = server.relatedOrigins();
+    if (!body) return { kind: 'not-found' };
+    return { kind: 'json', status: 200, body, cache: 'public, max-age=3600' };
+  }
 
   if (method === 'POST' && path === '/register/start') {
     const body = asObject(request.body);
@@ -100,9 +111,7 @@ export async function dispatch(
   }
 
   if (method === 'POST' && path === '/register/finish') {
-    const result = await server.finishRegistration(
-      unwrapCeremonyResponse(request.body) as never,
-    );
+    const result = await server.finishRegistration(unwrapCeremonyResponse(request.body) as never);
     return {
       kind: 'registered',
       status: 200,
@@ -125,9 +134,7 @@ export async function dispatch(
   }
 
   if (method === 'POST' && path === '/login/finish') {
-    const result = await server.finishAuthentication(
-      unwrapCeremonyResponse(request.body) as never,
-    );
+    const result = await server.finishAuthentication(unwrapCeremonyResponse(request.body) as never);
     return {
       kind: 'authenticated',
       status: 200,
@@ -138,6 +145,17 @@ export async function dispatch(
       },
       result,
     };
+  }
+
+  // Level 3 signal methods. One round trip covers both the credential list and
+  // the account details, because the browser needs them together.
+  if (method === 'GET' && path === '/signals') {
+    const userId = requireSession(request);
+    const payload = await server.signals(userId);
+    // 204 rather than an empty list: an empty `allAcceptedCredentialIds` tells
+    // the platform to delete every passkey for this user.
+    if (!payload) return { kind: 'json', status: 204, body: null };
+    return { kind: 'json', status: 200, body: payload };
   }
 
   if (method === 'GET' && path === '/credentials') {
@@ -168,9 +186,13 @@ export async function dispatch(
 }
 
 /** Turn any thrown value into a status and a JSON body, without leaking internals. */
-export function renderError(error: unknown): { status: number; body: unknown } {
+export function renderError(error: unknown, verbose = false): { status: number; body: unknown } {
   if (error instanceof PasskeyError) {
-    return { status: error.status, body: error.toJSON() };
+    // `publicMessage`, where one exists, is the sanitised twin of a message
+    // written for a developer. Several of the developer-facing ones name the
+    // configuration or internal state, which an unauthenticated caller has no
+    // business learning.
+    return { status: error.status, body: error.toJSON({ verbose }) };
   }
   return {
     status: 500,

@@ -25,11 +25,7 @@ export type ResidentKeyRequirementName = 'required' | 'preferred' | 'discouraged
 
 export type AttachmentName = 'platform' | 'cross-platform';
 
-export type AttestationConveyancePreferenceName =
-  | 'none'
-  | 'indirect'
-  | 'direct'
-  | 'enterprise';
+export type AttestationConveyancePreferenceName = 'none' | 'indirect' | 'direct' | 'enterprise';
 
 export interface PublicKeyCredentialDescriptorJSON {
   id: Base64URLString;
@@ -123,7 +119,6 @@ export const COSEAlgorithm = {
   RS256: -257,
   RS384: -258,
   RS512: -259,
-  RS1: -65535,
 } as const;
 
 export type COSEAlgorithmIdentifier = (typeof COSEAlgorithm)[keyof typeof COSEAlgorithm];

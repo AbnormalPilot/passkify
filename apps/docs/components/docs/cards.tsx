@@ -1,4 +1,4 @@
-import * as React from 'react';
+import type * as React from 'react';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -54,9 +54,7 @@ export function ContrastItem({
           : 'border-l-[5px] border-brand bg-canvas-paper',
       )}
     >
-      <p
-        className={cn('t-mono-caps mb-2', tone === 'good' ? 'text-graphite' : 'text-ink')}
-      >
+      <p className={cn('t-mono-caps mb-2', tone === 'good' ? 'text-graphite' : 'text-ink')}>
         {title}
       </p>
       <div className="t-body-sm [&_pre]:!mt-0 [&_pre]:!bg-transparent [&_pre]:!p-0 [&_pre]:!border-0">

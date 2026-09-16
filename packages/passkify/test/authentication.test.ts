@@ -1,8 +1,8 @@
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 
-import { PasskeyServer, MemoryStore, PasskeyError } from '../dist/esm/server/index.js';
-import { VirtualAuthenticator, FLAG } from './helpers/virtual-authenticator.ts';
+import { PasskeyServer, MemoryStore, PasskeyError } from 'passkify/server';
+import { VirtualAuthenticator, FLAG } from '#internal/testing/index.js';
 
 const RP_ID = 'example.com';
 const ORIGIN = 'https://example.com';
@@ -20,7 +20,11 @@ function makeServer(overrides: Record<string, unknown> = {}) {
 }
 
 /** Register one passkey and hand back everything a login test needs. */
-async function seed(server: PasskeyServer, username = 'ada', options: { algorithm?: 'ES256' | 'RS256' | 'EdDSA' } = {}) {
+async function seed(
+  server: PasskeyServer,
+  username = 'ada',
+  options: { algorithm?: 'ES256' | 'RS256' | 'EdDSA' } = {},
+) {
   const authenticator = new VirtualAuthenticator({ rpId: RP_ID, algorithm: options.algorithm });
   const start = await server.startRegistration({ username });
   const created = authenticator.create({ challenge: start.options.challenge, origin: ORIGIN });
@@ -138,7 +142,7 @@ test('an assertion cannot be replayed', async () => {
   );
 });
 
-test("a registration challenge cannot be spent on a login", async () => {
+test('a registration challenge cannot be spent on a login', async () => {
   const { server } = makeServer();
   const { authenticator, user } = await seed(server);
 

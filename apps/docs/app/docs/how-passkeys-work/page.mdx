@@ -1,7 +1,11 @@
-export const metadata = {
+import { buildMetadata } from '@/lib/metadata';
+
+export const metadata = buildMetadata({
+  route: '/docs/how-passkeys-work',
   title: 'How passkeys work',
-  description: 'Relying Party ID, challenges, user handles, and discoverable credentials.',
-};
+  description:
+    'Relying Party ID, challenges, user handles, and discoverable credentials.',
+});
 
 Enough of the model to debug your own integration. Ten minutes here saves an
 hour of guessing at `rpID`.

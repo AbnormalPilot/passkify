@@ -1,5 +1,5 @@
 /**
- * A software authenticator for tests.
+ * A software authenticator, for testing your own passkey integration.
  *
  * It assembles authenticator data byte by byte from the WebAuthn spec's field
  * layout and signs with real keys from `node:crypto`, so it exercises the
@@ -7,11 +7,16 @@
  * ways it can be made to misbehave, which is most of what the tests check.
  */
 
-import { createHash, createSign, generateKeyPairSync, sign as nodeSign, type KeyObject } from 'node:crypto';
-import { encodeCBOR, type Encodable } from './cbor-encode.ts';
+import {
+  createHash,
+  createSign,
+  generateKeyPairSync,
+  sign as nodeSign,
+  type KeyObject,
+} from 'node:crypto';
+import { encodeCBOR, type Encodable } from './cbor-encode.js';
 
-const b64url = (bytes: Uint8Array): string =>
-  Buffer.from(bytes).toString('base64url');
+const b64url = (bytes: Uint8Array): string => Buffer.from(bytes).toString('base64url');
 
 const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
 
@@ -60,8 +65,12 @@ export interface CreateOptions {
     origin?: string;
     crossOrigin?: boolean;
   };
-  /** `'none'` (default) or `'packed'` self-attestation. */
-  attestation?: 'none' | 'packed';
+  /**
+   * `'none'` (default), `'packed'` self-attestation, or an arbitrary format.
+   * Real authenticators do send formats passkify has no verifier for — a
+   * TPM-backed Windows Hello sends `tpm` — so the helper has to be able to.
+   */
+  attestation?: 'none' | 'packed' | { format: string; statement?: Map<string | number, Encodable> };
 }
 
 export interface AssertOptions {
@@ -212,9 +221,7 @@ export class VirtualAuthenticator {
 
     let attestationObject: Uint8Array;
     if (options.attestation === 'packed') {
-      const clientDataHash = new Uint8Array(
-        createHash('sha256').update(clientDataJSON).digest(),
-      );
+      const clientDataHash = new Uint8Array(createHash('sha256').update(clientDataJSON).digest());
       const signature = this.sign(concat(authData, clientDataHash));
       attestationObject = encodeCBOR(
         new Map<string | number, Encodable>([
@@ -226,6 +233,14 @@ export class VirtualAuthenticator {
               ['sig', signature],
             ]),
           ],
+          ['authData', authData],
+        ]),
+      );
+    } else if (typeof options.attestation === 'object') {
+      attestationObject = encodeCBOR(
+        new Map<string | number, Encodable>([
+          ['fmt', options.attestation.format],
+          ['attStmt', options.attestation.statement ?? new Map<string | number, Encodable>()],
           ['authData', authData],
         ]),
       );

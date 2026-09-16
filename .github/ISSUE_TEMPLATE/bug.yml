@@ -1,0 +1,70 @@
+name: Bug report
+description: Something in passkify behaves incorrectly.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not report security vulnerabilities here.** Use
+        [private vulnerability reporting](https://github.com/AbnormalPilot/passkify/security/advisories/new).
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations: { required: true }
+
+  - type: input
+    id: code
+    attributes:
+      label: PasskeyErrorCode
+      description: The `code` on the thrown `PasskeyError`, if there was one.
+      placeholder: origin_mismatch
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: The smallest code that shows the problem. A failing test is ideal.
+      render: ts
+    validations: { required: true }
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Your PasskeyServer configuration
+      description: >
+        `rpID` and `origin` especially — most reports come down to these two.
+        Redact secrets, but keep the shape.
+      render: ts
+    validations: { required: true }
+
+  - type: input
+    id: version
+    attributes:
+      label: passkify version
+      placeholder: 0.1.1
+    validations: { required: true }
+
+  - type: input
+    id: runtime
+    attributes:
+      label: Runtime
+      placeholder: Node 22.11 / Bun 1.1 / Cloudflare Workers / Deno 2.1
+    validations: { required: true }
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and authenticator
+      description: Only for problems during a ceremony.
+      placeholder: Safari 18 on macOS, Touch ID
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before filing
+      options:
+        - label: I ran `npx passkify doctor` and it did not explain the problem.
+        - label: I am not using `MemoryStore` in production or across multiple workers.

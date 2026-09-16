@@ -1,0 +1,137 @@
+[
+  {
+    "code": "unsupported",
+    "description": "This browser or context has no WebAuthn support at all.",
+    "status": 401
+  },
+  {
+    "code": "cancelled",
+    "description": "The user dismissed the prompt, or it timed out. Not an error to log loudly.",
+    "status": 401
+  },
+  {
+    "code": "already_registered",
+    "description": "The authenticator already holds a credential for this account.",
+    "status": 401
+  },
+  {
+    "code": "insecure_context",
+    "description": "The page is not on a secure origin, or `rpId` does not match the page.",
+    "status": 401
+  },
+  {
+    "code": "not_allowed",
+    "description": "The authenticator refused: no matching credential, or policy mismatch.",
+    "status": 401
+  },
+  {
+    "code": "ceremony_in_progress",
+    "description": "A ceremony is already in flight; browsers allow only one at a time.",
+    "status": 401
+  },
+  {
+    "code": "server_error",
+    "description": "Talking to your own server failed (network, non-2xx, bad JSON).",
+    "status": 401
+  },
+  {
+    "code": "malformed_response",
+    "description": "The response was not valid JSON of the expected shape.",
+    "status": 400
+  },
+  {
+    "code": "payload_too_large",
+    "description": "The request body exceeded the adapter's cap before it could be parsed. The rest is drained and discarded rather than buffered: holding an unbounded body from an unauthenticated caller in memory is the cheapest denial of service there is.",
+    "status": 413
+  },
+  {
+    "code": "challenge_not_found",
+    "description": "No pending challenge, or it expired / was already used.",
+    "status": 401
+  },
+  {
+    "code": "challenge_mismatch",
+    "description": "The signed challenge is not the one we issued.",
+    "status": 401
+  },
+  {
+    "code": "origin_mismatch",
+    "description": "`clientData.origin` is not in the allow-list.",
+    "status": 401
+  },
+  {
+    "code": "type_mismatch",
+    "description": "`clientData.type` is not the expected ceremony type.",
+    "status": 401
+  },
+  {
+    "code": "rpid_mismatch",
+    "description": "The authenticator signed for a different Relying Party ID.",
+    "status": 401
+  },
+  {
+    "code": "user_not_present",
+    "description": "The user-present flag was not set.",
+    "status": 401
+  },
+  {
+    "code": "user_not_verified",
+    "description": "User verification was required but the flag was not set.",
+    "status": 401
+  },
+  {
+    "code": "bad_signature",
+    "description": "The signature did not verify against the stored public key.",
+    "status": 401
+  },
+  {
+    "code": "counter_regression",
+    "description": "The signature counter went backwards — a possible cloned authenticator.",
+    "status": 403
+  },
+  {
+    "code": "unknown_credential",
+    "description": "The credential is not registered, or not for this user.",
+    "status": 404
+  },
+  {
+    "code": "credential_exists",
+    "description": "This credential ID is already registered.",
+    "status": 409
+  },
+  {
+    "code": "last_credential",
+    "description": "Refusing to remove an account's only passkey, which would lock the user out. A conflict with the account's current state, not a fault.",
+    "status": 409
+  },
+  {
+    "code": "unsupported_algorithm",
+    "description": "The public key algorithm is not one we offered or can verify.",
+    "status": 401
+  },
+  {
+    "code": "attestation_failed",
+    "description": "The attestation statement is malformed or failed to verify.",
+    "status": 401
+  },
+  {
+    "code": "unsupported_feature",
+    "description": "Well-formed input we simply do not implement (e.g. an exotic attestation format).",
+    "status": 500
+  },
+  {
+    "code": "parse_error",
+    "description": "Bad CBOR, truncated authenticator data, etc.",
+    "status": 400
+  },
+  {
+    "code": "configuration_error",
+    "description": "The library was configured incorrectly (wrong origin, missing store, ...).",
+    "status": 500
+  },
+  {
+    "code": "unknown_user",
+    "description": "The user record could not be found or created.",
+    "status": 404
+  }
+]

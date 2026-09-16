@@ -67,12 +67,7 @@ export function DocsSidebar({ onNavigate }: { onNavigate?: () => void }) {
                   isOpen && 'rotate-90',
                 )}
               />
-              <span
-                className={cn(
-                  't-mono-caps',
-                  containsActive ? 'text-ink' : 'text-graphite',
-                )}
-              >
+              <span className={cn('t-mono-caps', containsActive ? 'text-ink' : 'text-graphite')}>
                 {section.title}
               </span>
               <span className="t-mono-micro ml-auto tabular-nums text-graphite">

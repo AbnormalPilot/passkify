@@ -1,77 +1,103 @@
+<div align="center">
+
 # passkify
 
 **Passkeys for your website, without the WebAuthn homework.**
 
-A passkey is a key pair. The private half never leaves the visitor's device and
-the public half is all you store, so there is no password to reuse, no hash to
-crack, and nothing worth stealing in a database dump. What stands between that
-idea and a working login is about six hundred lines of specification. This
-library is that six hundred lines, so your application does not have to be.
+[![npm](https://img.shields.io/npm/v/passkify?color=%23f36458&label=npm)](https://www.npmjs.com/package/passkify)
+[![CI](https://github.com/AbnormalPilot/passkify/actions/workflows/ci.yml/badge.svg)](https://github.com/AbnormalPilot/passkify/actions/workflows/ci.yml)
+[![provenance](https://img.shields.io/badge/npm-provenance-blue)](https://docs.npmjs.com/generating-provenance-statements)
+[![zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](https://www.npmjs.com/package/passkify?activeTab=dependencies)
+[![MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
-Zero runtime dependencies. Client and server in one package. TypeScript
-throughout.
+[Documentation](https://passkify.himanshubuilds.in) ·
+[Live demo](https://passkify.himanshubuilds.in/demo) ·
+[Changelog](./CHANGELOG.md) ·
+[Contributing](./CONTRIBUTING.md)
+
+</div>
+
+---
+
+This is the monorepo. The package itself is
+[`packages/passkify`](./packages/passkify), and its README is what npm shows.
 
 ```bash
 npm install passkify
 ```
 
-## What it looks like
-
-```js
-// --- server ---
-import { PasskeyServer, MemoryStore } from 'passkify';
+```ts
+import { PasskeyServer, MemoryStore } from 'passkify/server';
 
 const passkeys = new PasskeyServer({
-  rpName: 'Acme',
-  origin: 'https://acme.com',   // scheme + host + port, exactly as served
-  store: new MemoryStore(),     // development only
+  rpName: 'Example',
+  rpID: 'example.com',
+  origin: 'https://example.com',
+  store: new MemoryStore(),
 });
 
-app.use(passkeys.express({
-  onLogin: (req, res, { user }) => { req.session.userId = user.id; },
-}));
+app.use(passkeys.express({ onLogin: (req, _res, r) => { req.session.userId = r.user.id; } }));
 ```
 
-```js
-// --- browser ---
+```ts
 import { register, login } from 'passkify/client';
 
-await register({ username: 'ada' });  // sign up
-await login();                        // sign in: no username, no password
+await register({ username: 'ada@example.com' });
+await login({ username: 'ada@example.com' });
 ```
 
-That is a working passwordless login. Everything else — the fourteen checks the
-authentication path runs, the typed errors it throws instead of returning a
-boolean, the store you implement for production — is documented rather than
-assumed.
+## What is in here
 
-## What is in this repository
-
-| Path                | What it is                                  | Ships to |
-| ------------------- | ------------------------------------------- | -------- |
-| `packages/passkify` | The library. Zero runtime dependencies.     | npm      |
-| `apps/docs`         | Documentation site and live demo.           | Vercel   |
-
-The docs site is not a folder of markdown next to the code — it imports the
-library's TypeScript source directly, so an example that would not compile does
-not ship. It also hosts a working demo at `/demo` that runs a real ceremony
-against your own authenticator.
+| Path | What |
+| --- | --- |
+| [`packages/passkify`](./packages/passkify) | The library. Client, server, adapters, stores, CLI. Zero runtime dependencies. |
+| [`apps/docs`](./apps/docs) | The documentation site and live demo, at [passkify.himanshubuilds.in](https://passkify.himanshubuilds.in). |
+| [`skills/`](./skills) | Agent skills, installable with `npx passkify skills install` or `npx skills add AbnormalPilot/passkify`. |
 
 ## Documentation
 
-- **[Full documentation](https://passkify.himanshubuilds.in)** — API reference, guides, and
-  the security model.
-- **[Package README](./packages/passkify/README.md)** — what npm shows.
-- **[QUICKSTART.md](./QUICKSTART.md)** — running, testing and releasing this
-  repository locally.
+Start at the [quickstart](https://passkify.himanshubuilds.in/docs/quickstart), or
+go straight to what you need:
+
+- [Server API](https://passkify.himanshubuilds.in/docs/server/passkey-server) ·
+  [Configuration](https://passkify.himanshubuilds.in/docs/server/configuration) ·
+  [HTTP adapters](https://passkify.himanshubuilds.in/docs/server/adapters)
+- [Client API](https://passkify.himanshubuilds.in/docs/client) ·
+  [Error codes](https://passkify.himanshubuilds.in/docs/errors) ·
+  [Types](https://passkify.himanshubuilds.in/docs/types)
+- [Storage](https://passkify.himanshubuilds.in/docs/storage) ·
+  [Store adapters](https://passkify.himanshubuilds.in/docs/storage/adapters)
+- [Security model](https://passkify.himanshubuilds.in/docs/guides/security) ·
+  [Troubleshooting](https://passkify.himanshubuilds.in/docs/guides/troubleshooting)
+
+## For AI agents
+
+```bash
+npx passkify skills install   # Claude Code, Cursor, Codex, Copilot, Gemini, OpenCode
+npx passkify mcp              # MCP server over the docs and a live config validator
+npx passkify doctor           # check an integration for the mistakes that break it
+npx passkify init             # scaffold one
+```
+
+Plus [`/llms.txt`](https://passkify.himanshubuilds.in/llms.txt),
+[`/llms-full.txt`](https://passkify.himanshubuilds.in/llms-full.txt), and a `.md`
+twin of every documentation page — `curl https://passkify.himanshubuilds.in/docs/client.md`.
 
 ## Contributing
 
-Start with [QUICKSTART.md](./QUICKSTART.md). Two things are worth knowing before
-opening a pull request: the library takes **no runtime dependencies**, and every
-public API change needs the documentation site updated in the same commit, since
-the site compiles against the source it documents.
+[CONTRIBUTING.md](./CONTRIBUTING.md) covers running the site, testing the
+library and cutting a release. In short:
+
+```bash
+npm install
+npm run dev       # docs site on :3000
+npm run verify    # everything CI runs
+```
+
+Security reports go through
+[private advisories](https://github.com/AbnormalPilot/passkify/security/advisories/new),
+never public issues — see [SECURITY.md](./SECURITY.md).
 
 ## License
 
-MIT — see [LICENSE](./packages/passkify/LICENSE).
+MIT. Built by [Himanshu Dubey](https://github.com/AbnormalPilot).

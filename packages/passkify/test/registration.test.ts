@@ -1,8 +1,8 @@
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 
-import { PasskeyServer, MemoryStore, PasskeyError } from '../dist/esm/server/index.js';
-import { VirtualAuthenticator, FLAG } from './helpers/virtual-authenticator.ts';
+import { PasskeyServer, MemoryStore, PasskeyError } from 'passkify/server';
+import { VirtualAuthenticator, FLAG } from '#internal/testing/index.js';
 
 const RP_ID = 'example.com';
 const ORIGIN = 'https://example.com';
@@ -328,6 +328,47 @@ test('packed self-attestation verifies, and a wrong signature does not', async (
   assert.equal(result.attestation.trusted, false);
 });
 
+test('an attestation format passkify cannot verify still registers when none was asked for', async () => {
+  // A TPM-backed Windows Hello sends fmt: "tpm" even under the default
+  // attestation: "none". Refusing it would lock out real users over a
+  // statement the site never requested.
+  const { server } = makeServer();
+  const authenticator = new VirtualAuthenticator({ rpId: RP_ID });
+  const { options } = await server.startRegistration({ username: 'ada' });
+  const response = authenticator.create({
+    challenge: options.challenge,
+    origin: ORIGIN,
+    attestation: {
+      format: 'tpm',
+      statement: new Map<string | number, never>([['ver', '2.0' as never]]),
+    },
+  });
+
+  const result = await server.finishRegistration(response as never);
+
+  assert.equal(result.verified, true);
+  // Reported honestly: the real format, and nothing claimed about trust.
+  assert.equal(result.attestation.format, 'tpm');
+  assert.equal(result.attestation.type, 'none');
+  assert.equal(result.attestation.trusted, false);
+});
+
+test('an unverifiable attestation format is refused when the site did ask for one', async () => {
+  const { server } = makeServer({ attestation: 'direct' });
+  const authenticator = new VirtualAuthenticator({ rpId: RP_ID });
+  const { options } = await server.startRegistration({ username: 'ada' });
+  const response = authenticator.create({
+    challenge: options.challenge,
+    origin: ORIGIN,
+    attestation: { format: 'tpm' },
+  });
+
+  await assert.rejects(
+    () => server.finishRegistration(response as never),
+    (error: PasskeyError) => error.code === 'unsupported_feature',
+  );
+});
+
 test('a tampered packed attestation is rejected', async () => {
   const { server } = makeServer();
   const authenticator = new VirtualAuthenticator({ rpId: RP_ID });
@@ -345,13 +386,15 @@ test('a tampered packed attestation is rejected', async () => {
 
   await assert.rejects(
     () => server.finishRegistration(response as never),
-    (error: PasskeyError) =>
-      error.code === 'attestation_failed' || error.code === 'parse_error',
+    (error: PasskeyError) => error.code === 'attestation_failed' || error.code === 'parse_error',
   );
 });
 
 test('RSA and Ed25519 authenticators are supported when offered', async () => {
-  for (const [algorithm, alg] of [['RS256', -257], ['EdDSA', -8]] as const) {
+  for (const [algorithm, alg] of [
+    ['RS256', -257],
+    ['EdDSA', -8],
+  ] as const) {
     const { server } = makeServer({ supportedAlgorithms: [-7, -257, -8] });
     const authenticator = new VirtualAuthenticator({ rpId: RP_ID, algorithm });
     const { result } = await registerFully(server, `user-${algorithm}`, authenticator);

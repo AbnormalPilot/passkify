@@ -13,12 +13,15 @@
  * — differ only in whether the challenge carries a `userId`.
  */
 
-import { createHash, randomBytes } from 'node:crypto';
+import { sha256 } from './crypto/digest.js';
+import { randomBytes } from './crypto/random.js';
 import { PasskeyError } from '../shared/errors.js';
+import { createTrace, type Trace, type CheckEvent } from '../shared/trace.js';
 import {
   toBase64Url,
   fromBase64Url,
   bytesToUtf8,
+  utf8ToBytes,
   bytesEqual,
   concatBytes,
 } from '../shared/base64url.js';
@@ -97,6 +100,8 @@ export async function createAuthenticationOptions(
           })),
         }
       : {}),
+    ...(Object.keys(config.extensions).length ? { extensions: { ...config.extensions } } : {}),
+    ...(config.hints.length ? { hints: [...config.hints] } : {}),
   };
 
   return { options, ...(user ? { userId: user.id } : {}) };
@@ -110,68 +115,101 @@ export interface VerifyAuthenticationResult {
   signCount: number;
   /** True when the authenticator verified the human, not just their presence. */
   userVerified: boolean;
+  /**
+   * Every check the verifier ran, in order. Present only when the server was
+   * constructed with `explain: true`.
+   */
+  checks?: readonly CheckEvent[];
 }
 
 export async function verifyAuthentication(
   config: ResolvedConfig,
   response: AuthenticationResponseJSON,
 ): Promise<VerifyAuthenticationResult> {
+  const trace: Trace = createTrace('authentication', config.hooks.onCheck);
+
   assertAuthenticationResponseShape(response);
+  trace.record('auth.response_well_formed', true);
 
   const clientDataBytes = decodeField(response.response.clientDataJSON, 'clientDataJSON');
   const clientData = parseClientData(clientDataBytes);
 
   const pending = await config.store.takeChallenge(clientData.challenge);
-  if (!pending) {
-    throw new PasskeyError(
-      'challenge_not_found',
-      'no pending login matches this response — it may have expired, already been used, or ' +
-        'been issued by a different server process',
-    );
-  }
-  if (pending.kind !== 'authentication') {
-    throw new PasskeyError(
-      'type_mismatch',
-      'that challenge was issued for a registration, not a login',
-    );
-  }
-  if (!challengeMatches(clientData.challenge, pending.challenge)) {
-    throw new PasskeyError('challenge_mismatch', 'the signed challenge is not the one we issued');
-  }
-  if (clientData.type !== 'webauthn.get') {
-    throw new PasskeyError(
-      'type_mismatch',
-      `expected clientData.type "webauthn.get", got "${clientData.type}"`,
-    );
-  }
-  if (!originAllowed(clientData.origin, config.origins)) {
-    throw new PasskeyError(
-      'origin_mismatch',
-      `origin "${clientData.origin}" is not in the allowed list`,
-    );
-  }
-  if (clientData.crossOrigin === true) {
-    throw new PasskeyError(
-      'origin_mismatch',
-      'this ceremony ran in a cross-origin frame, which passkify does not allow',
-    );
-  }
+  trace.assert(
+    'auth.challenge_found',
+    pending !== null,
+    () =>
+      new PasskeyError(
+        'challenge_not_found',
+        'no pending login matches this response — it may have expired, already been used, ' +
+          'or been issued by a different server process',
+      ),
+  );
+  if (!pending) throw new PasskeyError('challenge_not_found', 'unreachable');
+
+  trace.assert(
+    'auth.challenge_kind',
+    pending.kind === 'authentication',
+    () =>
+      new PasskeyError(
+        'type_mismatch',
+        'that challenge was issued for a registration, not a login',
+      ),
+  );
+  trace.assert(
+    'auth.challenge_matches',
+    challengeMatches(clientData.challenge, pending.challenge),
+    () => new PasskeyError('challenge_mismatch', 'the signed challenge is not the one we issued'),
+  );
+  trace.assert(
+    'auth.client_data_type',
+    clientData.type === 'webauthn.get',
+    () =>
+      new PasskeyError(
+        'type_mismatch',
+        `expected clientData.type "webauthn.get", got "${clientData.type}"`,
+      ),
+  );
+  trace.assert(
+    'auth.origin_allowed',
+    originAllowed(clientData.origin, config.origins),
+    () =>
+      new PasskeyError(
+        'origin_mismatch',
+        `origin "${clientData.origin}" is not in the allowed list`,
+      ),
+  );
+  trace.assert(
+    'auth.not_cross_origin',
+    clientData.crossOrigin !== true,
+    () =>
+      new PasskeyError(
+        'origin_mismatch',
+        'this ceremony ran in a cross-origin frame, which passkify does not allow',
+      ),
+  );
 
   const rawId = decodeField(response.rawId, 'rawId');
   const credentialId = toBase64Url(rawId);
 
   const credential = await config.store.getCredentialById(credentialId);
-  if (!credential) {
-    throw new PasskeyError('unknown_credential', 'that passkey is not registered here');
-  }
+  trace.assert(
+    'auth.credential_known',
+    credential !== null,
+    () => new PasskeyError('unknown_credential', 'that passkey is not registered here'),
+  );
+  if (!credential) throw new PasskeyError('unknown_credential', 'unreachable');
 
   // If the ceremony was scoped to one account, the credential must belong to it.
-  if (pending.userId && credential.userId !== pending.userId) {
-    throw new PasskeyError(
-      'unknown_credential',
-      'that passkey does not belong to the account this login was started for',
-    );
-  }
+  trace.assert(
+    'auth.credential_belongs_to_account',
+    !pending.userId || credential.userId === pending.userId,
+    () =>
+      new PasskeyError(
+        'unknown_credential',
+        'that passkey does not belong to the account this login was started for',
+      ),
+  );
 
   // A discoverable credential returns the user handle. When present it must
   // agree with our record — this is what binds an assertion to an account in
@@ -186,47 +224,62 @@ export async function verifyAuthentication(
         cause,
       });
     }
-    if (decoded !== credential.userId) {
-      throw new PasskeyError(
-        'unknown_credential',
-        'the user handle in the response does not match the credential owner',
-      );
-    }
+    trace.assert(
+      'auth.user_handle_matches',
+      decoded === credential.userId,
+      () =>
+        new PasskeyError(
+          'unknown_credential',
+          'the user handle in the response does not match the credential owner',
+        ),
+    );
+  } else {
+    trace.record('auth.user_handle_matches', true);
   }
 
   const authDataBytes = decodeField(response.response.authenticatorData, 'authenticatorData');
   const authData = parseAuthenticatorData(authDataBytes);
 
-  const expectedRpIdHash = new Uint8Array(createHash('sha256').update(config.rpID).digest());
-  if (!bytesEqual(authData.rpIdHash, expectedRpIdHash)) {
-    throw new PasskeyError(
-      'rpid_mismatch',
-      `the assertion was signed for a different Relying Party ID than "${config.rpID}"`,
-    );
-  }
+  const expectedRpIdHash = await sha256(utf8ToBytes(config.rpID));
+  trace.assert(
+    'auth.rp_id_hash',
+    bytesEqual(authData.rpIdHash, expectedRpIdHash),
+    () =>
+      new PasskeyError(
+        'rpid_mismatch',
+        `the assertion was signed for a different Relying Party ID than "${config.rpID}"`,
+      ),
+  );
 
-  if (!authData.flags.userPresent) {
-    throw new PasskeyError('user_not_present', 'the user-present flag was not set');
-  }
+  trace.assert(
+    'auth.user_present',
+    authData.flags.userPresent,
+    () => new PasskeyError('user_not_present', 'the user-present flag was not set'),
+  );
   const requiredUserVerification =
     (pending.context?.userVerification as UserVerificationRequirementName | undefined) ??
     config.userVerification;
-  if (requiredUserVerification === 'required' && !authData.flags.userVerified) {
-    throw new PasskeyError(
-      'user_not_verified',
-      'user verification was required but the authenticator only reported presence',
-    );
-  }
+  trace.assert(
+    'auth.user_verified',
+    requiredUserVerification !== 'required' || authData.flags.userVerified,
+    () =>
+      new PasskeyError(
+        'user_not_verified',
+        'user verification was required but the authenticator only reported presence',
+      ),
+  );
 
   // The heart of it: the authenticator signed authenticatorData || SHA-256(clientDataJSON).
-  const clientDataHash = new Uint8Array(createHash('sha256').update(clientDataBytes).digest());
+  const clientDataHash = await sha256(clientDataBytes);
   const signatureBase = concatBytes(authData.bytes, clientDataHash);
   const signature = decodeField(response.response.signature, 'signature');
 
-  const publicKey = parseCOSEPublicKey(fromBase64Url(credential.publicKey));
-  if (!verifySignature(publicKey, signatureBase, signature)) {
-    throw new PasskeyError('bad_signature', 'the assertion signature did not verify');
-  }
+  const publicKey = await parseCOSEPublicKey(fromBase64Url(credential.publicKey));
+  trace.assert(
+    'auth.signature_verifies',
+    await verifySignature(publicKey, signatureBase, signature),
+    () => new PasskeyError('bad_signature', 'the assertion signature did not verify'),
+  );
 
   const user = await config.store.getUserById(credential.userId);
   if (!user) {
@@ -236,23 +289,42 @@ export async function verifyAuthentication(
   // Counter check. Most passkeys report 0 forever, in which case there is
   // nothing to compare; a counter that moves but goes backwards is the classic
   // cloned-authenticator signal.
-  if (authData.signCount > 0 || credential.counter > 0) {
-    if (authData.signCount <= credential.counter) {
-      const allow = await config.hooks.onCounterRegression?.({
-        user,
-        credential,
-        storedCounter: credential.counter,
-        presentedCounter: authData.signCount,
-      });
-      if (allow !== true) {
-        throw new PasskeyError(
-          'counter_regression',
-          `the signature counter went from ${credential.counter} to ${authData.signCount}, ` +
-            `which can mean this authenticator has been cloned`,
-        );
-      }
-    }
+  let counterAccepted = true;
+  if (
+    (authData.signCount > 0 || credential.counter > 0) &&
+    authData.signCount <= credential.counter
+  ) {
+    const allow = await config.hooks.onCounterRegression?.({
+      user,
+      credential,
+      storedCounter: credential.counter,
+      presentedCounter: authData.signCount,
+    });
+    counterAccepted = allow === true;
   }
+  trace.assert(
+    'auth.counter_not_regressed',
+    counterAccepted,
+    () =>
+      // The counters stay out of the public message: they are internal state,
+      // and this response goes to an unauthenticated caller. They are on
+      // `details` for your logs instead. 403 rather than 401, because the
+      // meaning is "do not retry", not "try again with better credentials".
+      new PasskeyError(
+        'counter_regression',
+        `the signature counter went from ${credential.counter} to ${authData.signCount}, ` +
+          `which can mean this authenticator has been cloned`,
+        {
+          publicMessage:
+            'this passkey was refused for security reasons. If this is unexpected, remove it ' +
+            'and register it again.',
+          details: {
+            storedCounter: credential.counter,
+            presentedCounter: authData.signCount,
+          },
+        },
+      ),
+  );
 
   await config.store.updateCredential(credential.id, {
     counter: authData.signCount,
@@ -270,6 +342,7 @@ export async function verifyAuthentication(
   await config.hooks.onAuthenticated?.({ user, credential: updated });
 
   return {
+    ...(config.explain ? { checks: trace.events } : {}),
     verified: true,
     user,
     credential: updated,
@@ -304,7 +377,7 @@ function assertAuthenticationResponseShape(
     throw new PasskeyError(
       'malformed_response',
       'that is not an authentication response. Send the object returned by passkify/client ' +
-        "`login()` — or `credential.toJSON()` — as the request body.",
+        '`login()` — or `credential.toJSON()` — as the request body.',
     );
   }
 }

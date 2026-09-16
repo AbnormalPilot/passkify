@@ -9,3 +9,26 @@ out/
 .env
 .env.*
 coverage/
+
+# npm pack artifacts
+*.tgz
+
+# editors
+.vscode/
+.idea/
+
+# tool caches
+.turbo/
+.eslintcache
+.biome-cache/
+
+# generated docs content (rebuilt by `npm run content`)
+apps/docs/lib/generated/
+apps/docs/public/search/
+!.env.example
+
+# Copied from the repository root by the package build.
+packages/passkify/CHANGELOG.md
+
+# A separate repository that happens to sit in this working directory.
+passkify-skill/

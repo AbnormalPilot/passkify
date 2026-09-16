@@ -26,6 +26,12 @@ export interface ClientConfig {
   headers?: Record<string, string>;
   /** Passed to every request. Set to `'include'` for cross-origin cookie auth. */
   credentials?: RequestCredentials;
+  /**
+   * When a login is refused with `unknown_credential`, tell the platform that
+   * the passkey it offered no longer exists here, so it stops appearing in the
+   * account picker. On by default; set `false` to opt out.
+   */
+  signalUnknownCredentials?: boolean;
 }
 
 /** A config with `baseUrl` guaranteed present. */

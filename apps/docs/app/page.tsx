@@ -11,12 +11,15 @@ import { Counter } from '@/components/motion/counter';
 import { CeremonyScroller } from '@/components/motion/ceremony-scroller';
 import { ChecksColumns } from '@/components/motion/checks-columns';
 import { CEREMONY, CHECKS, MEASURES, RUNTIMES, STORES, TENETS } from '@/lib/story';
+import { buildMetadata } from '@/lib/metadata';
 
-export const metadata: Metadata = {
+export const metadata: Metadata = buildMetadata({
+  route: '/',
   title: 'passkify',
   description:
     'Passkeys for your website. Client and server in one npm package, zero runtime dependencies, every check the WebAuthn specification asks for.',
-};
+  absoluteTitle: true,
+});
 
 export default function Home() {
   return (
@@ -90,20 +93,19 @@ export default function Home() {
               <div data-reveal>
                 <p className="t-mono-caps text-mute">What you hold today</p>
                 <p className="t-subtitle mt-md max-w-[46ch] text-ash">
-                  A hash of something your user probably reused. It sits in your database
-                  until the day it does not, and on that day the damage is theirs, not
-                  yours. Phishing does not even need the breach: a convincing copy of your
-                  login page is enough, because the user is the one being asked to
-                  recognise it.
+                  A hash of something your user probably reused. It sits in your database until the
+                  day it does not, and on that day the damage is theirs, not yours. Phishing does
+                  not even need the breach: a convincing copy of your login page is enough, because
+                  the user is the one being asked to recognise it.
                 </p>
               </div>
               <div data-reveal className="card-brand">
                 <p className="t-mono-caps text-ink/70">What you hold instead</p>
                 <p className="t-subtitle mt-md max-w-[46ch] text-ink">
-                  A public key. It verifies signatures and can do nothing else. Publish it
-                  on a billboard and no account is closer to being taken. The private half
-                  never leaves the device it was made on, and the browser will only sign
-                  for the exact domain that made it.
+                  A public key. It verifies signatures and can do nothing else. Publish it on a
+                  billboard and no account is closer to being taken. The private half never leaves
+                  the device it was made on, and the browser will only sign for the exact domain
+                  that made it.
                 </p>
               </div>
             </div>
@@ -123,7 +125,7 @@ export default function Home() {
         </section>
 
         {/* ---------------------------------------------------------- checks
-            Thirteen assertions, in three columns at different depths, because
+            Every authentication check, in three columns at different depths, because
             the point being made is that they keep coming. */}
         <section className="section-dark">
           <ChecksColumns
@@ -156,24 +158,20 @@ export default function Home() {
               <SupportGrid items={STORES} />
             </div>
 
-            {/* The condition, stated plainly. A support list without one is a
-                marketing claim rather than a specification. */}
+            {/* What the list rests on. A support grid without a stated basis
+                is a marketing claim rather than a specification. */}
             <div data-reveal className="alert-banner mt-xl max-w-[70ch]">
-              <p className="t-mono-caps mb-2">The one runtime requirement</p>
+              <p className="t-mono-caps mb-2">What the server half needs</p>
               <p>
-                Attestation verification uses <code className="font-mono">node:crypto</code>,
-                including <code className="font-mono">X509Certificate</code>. Bun and Deno
-                provide it. Cloudflare Workers needs the{' '}
-                <code className="font-mono">nodejs_compat</code> flag, and the guide says to
-                test that on your target before you commit to it. An edge runtime without
-                Node compatibility cannot run the server half at all, so on Next.js keep the
-                route handler on the Node runtime.
+                WebCrypto, and nothing else. Signature verification, X.509 parsing and hashing are
+                written against the global <code className="font-mono">crypto</code>, so no ceremony
+                path imports a <code className="font-mono">node:</code> built-in. A test walks every
+                source file on each run and fails if one appears, which is why Workers and Deno
+                carry no asterisk above, and why Cloudflare needs no{' '}
+                <code className="font-mono">nodejs_compat</code> flag.
               </p>
               <p className="mt-sm">
-                <Link
-                  href="/docs/guides/frameworks"
-                  className="underline underline-offset-4"
-                >
+                <Link href="/docs/guides/frameworks" className="underline underline-offset-4">
                   Every target above, with a worked example
                 </Link>
               </p>
@@ -215,9 +213,9 @@ export default function Home() {
                 The demo is the library
               </h2>
               <p data-reveal className="t-subtitle mt-lg max-w-[46ch] text-ash">
-                Nothing on the demo page is simulated. It mounts a real PasskeyServer over
-                a memory store and verifies the assertion your own authenticator produces.
-                If it works there, the same twelve lines work in your application.
+                Nothing on the demo page is simulated. It mounts a real PasskeyServer over a memory
+                store and verifies the assertion your own authenticator produces. If it works there,
+                that same route handler works in your application.
               </p>
               <div data-reveal className="mt-xl flex flex-wrap gap-sm">
                 <Button variant="primary" size="lg" asChild>
@@ -249,8 +247,8 @@ export {
               Stop storing passwords
             </h2>
             <p data-reveal className="t-subtitle mx-auto mt-lg max-w-[50ch] text-ash">
-              The documentation covers every method and every option, and says why each one
-              is shaped the way it is.
+              The documentation covers every method and every option, and says why each one is
+              shaped the way it is.
             </p>
             <div data-reveal className="mt-xxl flex flex-wrap items-center justify-center gap-sm">
               <Button variant="brand" size="lg" asChild>

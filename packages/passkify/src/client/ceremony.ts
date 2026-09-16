@@ -60,19 +60,30 @@ export function cancelPendingCeremony(): void {
   activeCeremony = null;
 }
 
-/** Run only the WebAuthn creation ceremony, given options from any server. */
+/**
+ * Run only the WebAuthn creation ceremony, given options from any server.
+ *
+ * `mediation: 'conditional'` is the Level 3 addition: the browser offers to
+ * create a passkey inside its own UI, after the user has just signed in some
+ * other way, without a modal interrupting them. It is how a site upgrades an
+ * existing password login to a passkey with no extra screen. Browsers that do
+ * not support it ignore the option and show the usual prompt.
+ */
 export async function createCredential(
   options: RegistrationOptionsJSON,
-  signal?: AbortSignal,
+  extras: AbortSignal | { signal?: AbortSignal; mediation?: CredentialMediationRequirement } = {},
 ): Promise<RegistrationResponseJSON> {
   assertSupported();
-  const controller = beginCeremony(signal);
+  // The second parameter used to be a bare AbortSignal.
+  const normalized = extras instanceof AbortSignal ? { signal: extras } : (extras ?? {});
+  const controller = beginCeremony(normalized.signal);
 
   let credential: PublicKeyCredential | null;
   try {
     credential = (await navigator.credentials.create({
       publicKey: toCreationOptions(options),
       signal: controller.signal,
+      ...(normalized.mediation ? { mediation: normalized.mediation } : {}),
     })) as PublicKeyCredential | null;
   } catch (error) {
     throw translateWebAuthnError(error, 'create');

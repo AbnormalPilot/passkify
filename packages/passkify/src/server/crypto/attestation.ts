@@ -18,17 +18,17 @@
  * should pass `rootCertificates`; everyone else can ignore this file.
  */
 
-import { X509Certificate, createHash, verify as nodeVerify, type KeyObject } from 'node:crypto';
+import { crypto } from './provider.js';
 import { PasskeyError } from '../../shared/errors.js';
-import { concatBytes, bytesEqual, fromBase64Url } from '../../shared/base64url.js';
+import { concatBytes, bytesEqual } from '../../shared/base64url.js';
 import { COSEAlgorithm } from '../../shared/types.js';
+import type { AttestationConveyancePreferenceName } from '../../shared/types.js';
 import { decodeMap, type CBORMap, type CBORValue } from './cbor.js';
-import {
-  parseCOSEPublicKey,
-  verifySignature,
-  digestForAlgorithm,
-  rsaPssOptionsFor,
-} from './cose.js';
+import { parseCOSEPublicKey, verifySignature, digestForAlgorithm } from './cose.js';
+import { Certificate, chainIsTrusted as verifyChain, OID } from './x509.js';
+import { sha256 } from './digest.js';
+import { derToP1363 } from './ecdsa-der.js';
+import { readElement, readChildren, TAG } from './asn1.js';
 import type { ParsedAuthenticatorData } from './authenticator-data.js';
 
 /** How the authenticator vouched for the new key. */
@@ -52,7 +52,7 @@ export interface AttestationResult {
    */
   trusted: boolean;
   /** The certificate chain as presented, if any. */
-  certificateChain?: X509Certificate[];
+  certificateChain?: Certificate[];
   /** Human-readable subject of the leaf certificate, when present. */
   attestationCertificateSubject?: string;
 }
@@ -67,6 +67,14 @@ export interface VerifyAttestationInput {
   aaguid: Uint8Array;
   /** PEM or DER roots to validate a chain against. Empty means "cannot trust". */
   rootCertificates?: readonly (string | Uint8Array)[];
+  /**
+   * What the site asked for in `attestation`. When it is `'none'` — the default
+   * — a format passkify cannot verify is *reported* rather than rejected: the
+   * site never wanted a statement, and some authenticators (TPM-backed Windows
+   * Hello, most visibly) send one regardless. Failing those registrations would
+   * lock out real users over a statement nobody asked for.
+   */
+  requested?: AttestationConveyancePreferenceName;
 }
 
 function fail(message: string, cause?: unknown): never {
@@ -81,7 +89,7 @@ function getBytes(statement: CBORMap, key: string): Uint8Array {
   return value;
 }
 
-function getChain(statement: CBORMap): X509Certificate[] | undefined {
+function getChain(statement: CBORMap): Certificate[] | undefined {
   const x5c = statement.get('x5c');
   if (x5c === undefined) {
     return undefined;
@@ -94,7 +102,7 @@ function getChain(statement: CBORMap): X509Certificate[] | undefined {
       fail(`x5c[${index}] is not a DER byte string`);
     }
     try {
-      return new X509Certificate(entry);
+      return Certificate.parse(entry);
     } catch (cause) {
       return fail(`x5c[${index}] is not a parseable X.509 certificate`, cause);
     }
@@ -102,30 +110,37 @@ function getChain(statement: CBORMap): X509Certificate[] | undefined {
 }
 
 /** Reject certificates that are expired or not yet valid. */
-function assertCertificateWindow(certificate: X509Certificate, label: string): void {
-  const now = Date.now();
-  const from = Date.parse(certificate.validFrom);
-  const to = Date.parse(certificate.validTo);
-  if (Number.isFinite(from) && now < from) {
-    fail(`${label} is not valid until ${certificate.validFrom}`);
+function assertCertificateWindow(certificate: Certificate, label: string): void {
+  const now = new Date();
+  if (now < certificate.notBefore) {
+    fail(`${label} is not valid until ${certificate.notBefore.toISOString()}`);
   }
-  if (Number.isFinite(to) && now > to) {
-    fail(`${label} expired on ${certificate.validTo}`);
+  if (now > certificate.notAfter) {
+    fail(`${label} expired on ${certificate.notAfter.toISOString()}`);
   }
 }
 
 /** Verify a signature made by a certificate's public key, given a COSE alg. */
-function verifyWithCertificate(
-  certificate: X509Certificate,
+async function verifyWithCertificate(
+  certificate: Certificate,
   alg: number,
   data: Uint8Array,
   signature: Uint8Array,
-): boolean {
-  const digest = digestForAlgorithm(alg);
-  const pssOptions = rsaPssOptionsFor(alg);
+): Promise<boolean> {
+  const hash = digestForAlgorithm(alg) ?? 'SHA-256';
   try {
-    const key = certificate.publicKey as KeyObject;
-    return nodeVerify(digest, data, pssOptions ? { key, ...pssOptions } : key, signature);
+    const key = await certificate.importPublicKey(hash);
+    const isEC = certificate.publicKey.algorithm === 'EC';
+    const params: AlgorithmIdentifier | EcdsaParams = isEC
+      ? { name: 'ECDSA', hash }
+      : { name: 'RSASSA-PKCS1-v1_5' };
+    const bytes = isEC ? derToP1363(signature, certificate.publicKey.curve ?? 'P-256') : signature;
+    return await crypto.subtle.verify(
+      params,
+      key,
+      bytes as unknown as BufferSource,
+      data as unknown as BufferSource,
+    );
   } catch {
     return false;
   }
@@ -133,21 +148,20 @@ function verifyWithCertificate(
 
 /**
  * Walk the presented chain and check it terminates at one of the supplied roots.
- * Returns false (rather than throwing) when no roots were supplied.
+ * Returns false (rather than throwing) when no roots were supplied — a chain
+ * that validates against nothing proves nothing, and saying so is honest.
  */
-function chainIsTrusted(
-  chain: X509Certificate[],
+async function chainIsTrusted(
+  chain: Certificate[],
   roots: readonly (string | Uint8Array)[] | undefined,
-): boolean {
+): Promise<boolean> {
   if (!roots || roots.length === 0) {
     return false;
   }
 
-  let rootCertificates: X509Certificate[];
+  let rootCertificates: Certificate[];
   try {
-    rootCertificates = roots.map((root) =>
-      new X509Certificate(typeof root === 'string' ? root : Buffer.from(root)),
-    );
+    rootCertificates = roots.map((root) => Certificate.from(root));
   } catch (cause) {
     throw new PasskeyError('configuration_error', 'a supplied root certificate is unparseable', {
       cause,
@@ -155,22 +169,10 @@ function chainIsTrusted(
   }
 
   for (let i = 0; i < chain.length; i++) {
-    const certificate = chain[i];
-    assertCertificateWindow(certificate, `x5c[${i}]`);
-    const issuer = chain[i + 1];
-    if (issuer) {
-      if (!certificate.checkIssued(issuer) || !certificate.verify(issuer.publicKey)) {
-        fail(`x5c[${i}] was not issued by x5c[${i + 1}]`);
-      }
-    }
+    assertCertificateWindow(chain[i], `x5c[${i}]`);
   }
 
-  const top = chain[chain.length - 1];
-  return rootCertificates.some(
-    (root) =>
-      bytesEqual(new Uint8Array(top.raw), new Uint8Array(root.raw)) ||
-      (top.checkIssued(root) && top.verify(root.publicKey)),
-  );
+  return verifyChain(chain, rootCertificates);
 }
 
 /** Rebuild the uncompressed EC point (0x04 || x || y) from a COSE key. */
@@ -197,7 +199,7 @@ function uncompressedECPoint(coseBytes: Uint8Array): Uint8Array {
  * Throws `PasskeyError('attestation_failed')` if a statement is present but
  * internally inconsistent; returns a descriptive result otherwise.
  */
-export function verifyAttestation(input: VerifyAttestationInput): AttestationResult {
+export async function verifyAttestation(input: VerifyAttestationInput): Promise<AttestationResult> {
   const { format, statement, authenticatorData, clientDataHash } = input;
   const signatureBase = concatBytes(authenticatorData.bytes, clientDataHash);
 
@@ -221,11 +223,11 @@ export function verifyAttestation(input: VerifyAttestationInput): AttestationRes
         // Self attestation: the freshly-minted credential key signs the
         // statement. It proves the response is internally consistent and
         // nothing more.
-        const credentialKey = parseCOSEPublicKey(input.credentialPublicKey);
+        const credentialKey = await parseCOSEPublicKey(input.credentialPublicKey);
         if (credentialKey.alg !== alg) {
           fail('packed self-attestation alg does not match the credential public key');
         }
-        if (!verifySignature(credentialKey, signatureBase, signature)) {
+        if (!(await verifySignature(credentialKey, signatureBase, signature))) {
           fail('packed self-attestation signature did not verify');
         }
         return { format, type: 'self', trusted: false };
@@ -233,17 +235,17 @@ export function verifyAttestation(input: VerifyAttestationInput): AttestationRes
 
       const leaf = chain[0];
       assertCertificateWindow(leaf, 'attestation certificate');
-      if (leaf.ca) {
+      if (leaf.basicConstraints.ca) {
         fail('the attestation certificate is a CA certificate; it must not be');
       }
-      if (!verifyWithCertificate(leaf, alg, signatureBase, signature)) {
+      if (!(await verifyWithCertificate(leaf, alg, signatureBase, signature))) {
         fail('packed attestation signature did not verify against the certificate');
       }
 
       return {
         format,
         type: 'basic',
-        trusted: chainIsTrusted(chain, input.rootCertificates),
+        trusted: await chainIsTrusted(chain, input.rootCertificates),
         certificateChain: chain,
         attestationCertificateSubject: leaf.subject,
       };
@@ -252,7 +254,7 @@ export function verifyAttestation(input: VerifyAttestationInput): AttestationRes
     case 'fido-u2f': {
       const signature = getBytes(statement, 'sig');
       const chain = getChain(statement);
-      if (!chain || chain.length !== 1) {
+      if (chain?.length !== 1) {
         fail('fido-u2f attestation requires exactly one certificate in x5c');
       }
       const leaf = chain[0];
@@ -267,14 +269,14 @@ export function verifyAttestation(input: VerifyAttestationInput): AttestationRes
         uncompressedECPoint(input.credentialPublicKey),
       );
 
-      if (!verifyWithCertificate(leaf, COSEAlgorithm.ES256, verificationData, signature)) {
+      if (!(await verifyWithCertificate(leaf, COSEAlgorithm.ES256, verificationData, signature))) {
         fail('fido-u2f attestation signature did not verify');
       }
 
       return {
         format,
         type: 'basic',
-        trusted: chainIsTrusted(chain, input.rootCertificates),
+        trusted: await chainIsTrusted(chain, input.rootCertificates),
         certificateChain: chain,
         attestationCertificateSubject: leaf.subject,
       };
@@ -291,60 +293,61 @@ export function verifyAttestation(input: VerifyAttestationInput): AttestationRes
       const leaf = chain[0];
       assertCertificateWindow(leaf, 'attestation certificate');
 
-      const expectedNonce = createHash('sha256').update(signatureBase).digest();
-      // OID 1.2.840.113635.100.8.2, whose value is a SEQUENCE wrapping the
-      // 32-byte nonce. Locate it by scanning the DER for the nonce itself.
-      const raw = new Uint8Array(leaf.raw);
-      if (indexOfBytes(raw, new Uint8Array(expectedNonce)) === -1) {
+      // OID 1.2.840.113635.100.8.2 carries a SEQUENCE wrapping a [1] tagged
+      // OCTET STRING that holds SHA-256(authData ‖ clientDataHash). Earlier
+      // versions scanned the whole certificate for those bytes; parsing the
+      // extension is a materially stronger check, because a nonce appearing
+      // anywhere in the DER is not the same as the authenticator asserting it.
+      const expectedNonce = await sha256(signatureBase);
+      const nonceExtension = leaf.extension(OID.APPLE_ANONYMOUS_ATTESTATION);
+      if (!nonceExtension) {
+        fail('apple attestation certificate has no nonce extension');
+      }
+      const nonceSequence = readElement(nonceExtension.value);
+      const [tagged] = readChildren(nonceSequence);
+      if (!tagged) fail('apple attestation nonce extension is empty');
+      const nonceOctets = readElement(tagged.content);
+      if (nonceOctets.tag !== TAG.OCTET_STRING) {
+        fail('apple attestation nonce is not an OCTET STRING');
+      }
+      if (!bytesEqual(nonceOctets.content, expectedNonce)) {
         fail('apple attestation nonce does not match the authenticator response');
       }
 
-      const credentialKey = parseCOSEPublicKey(input.credentialPublicKey);
-      const certificateJwk = (leaf.publicKey as KeyObject).export({ format: 'jwk' }) as {
-        x?: string;
-        y?: string;
-      };
-      const credentialJwk = credentialKey.key.export({ format: 'jwk' }) as {
-        x?: string;
-        y?: string;
-      };
-      if (
-        !certificateJwk.x ||
-        !credentialJwk.x ||
-        !bytesEqual(fromBase64Url(certificateJwk.x), fromBase64Url(credentialJwk.x)) ||
-        !certificateJwk.y ||
-        !credentialJwk.y ||
-        !bytesEqual(fromBase64Url(certificateJwk.y), fromBase64Url(credentialJwk.y))
-      ) {
+      // The leaf's public key must be the credential's public key.
+      const credentialPoint = uncompressedECPoint(input.credentialPublicKey);
+      if (leaf.publicKey.algorithm !== 'EC') {
+        fail('apple attestation certificate does not carry an EC public key');
+      }
+      // The SPKI ends with the uncompressed point, so comparing the tail is
+      // equivalent to comparing x and y without re-exporting either key.
+      const spki = leaf.publicKey.spki;
+      const tail = spki.subarray(spki.length - credentialPoint.length);
+      if (!bytesEqual(tail, credentialPoint)) {
         fail('apple attestation certificate key does not match the credential public key');
       }
 
       return {
         format,
         type: 'attca',
-        trusted: chainIsTrusted(chain, input.rootCertificates),
+        trusted: await chainIsTrusted(chain, input.rootCertificates),
         certificateChain: chain,
         attestationCertificateSubject: leaf.subject,
       };
     }
 
-    default:
+    default: {
+      // The site did not ask for attestation, so an unverifiable statement is
+      // not a reason to refuse the credential. Report it honestly instead:
+      // `format` carries what actually arrived, and `trusted` stays false.
+      if ((input.requested ?? 'none') === 'none') {
+        return { format, type: 'none', trusted: false };
+      }
       throw new PasskeyError(
         'unsupported_feature',
         `attestation format "${format}" is not implemented by passkify. ` +
           `Register with attestation: "none" (the default) unless you have a specific reason not to.`,
       );
-  }
-}
-
-function indexOfBytes(haystack: Uint8Array, needle: Uint8Array): number {
-  outer: for (let i = 0; i + needle.length <= haystack.length; i++) {
-    for (let j = 0; j < needle.length; j++) {
-      if (haystack[i + j] !== needle[j]) {
-        continue outer;
-      }
     }
-    return i;
   }
-  return -1;
 }

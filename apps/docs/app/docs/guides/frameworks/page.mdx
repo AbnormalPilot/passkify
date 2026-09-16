@@ -1,14 +1,19 @@
-export const metadata = {
+import { buildMetadata } from '@/lib/metadata';
+
+export const metadata = buildMetadata({
+  route: '/docs/guides/frameworks',
   title: 'Frameworks',
-  description: 'Express, Next.js, Hono, SvelteKit, Remix, Bun, Deno and Cloudflare Workers.',
-};
+  description:
+    'Express, Next.js, Hono, SvelteKit, Remix, Bun, Deno and Cloudflare Workers.',
+});
 
 Two adapter shapes cover everything: Node-stream middleware, and a fetch
 handler. Pick the one your framework speaks.
 
-<Callout type="warning" title="The server half needs the Node runtime">
-It uses `node:crypto` and will not run on an edge runtime. The browser half has
-no such constraint and runs anywhere.
+<Callout type="tip" title="Both halves run on an edge runtime">
+The verification path is pure WebCrypto — no `node:` built-in is imported
+anywhere a ceremony can reach, and a test walks the source on every run to keep
+it that way. Workers, Deno and Vercel Edge need no compatibility flag.
 </Callout>
 
 ## Express, Connect, Fastify
@@ -122,8 +127,9 @@ configure({ baseUrl: '/api/passkey' });   // must match basePath
     `register()` and `login()` touch `navigator.credentials`. They belong in a
     `'use client'` component or an event handler.
   </Prop>
-  <Prop name="runtime must be nodejs" type="not edge">
-    The server half uses `node:crypto`.
+  <Prop name="runtime" type="nodejs or edge">
+    Either works. The verification path is pure WebCrypto, so the route handler
+    does not have to be pinned to the Node runtime.
   </Prop>
 </PropList>
 
@@ -210,18 +216,19 @@ Deno.serve((request) => handler(request));
 
 ## Cloudflare Workers
 
-<Callout type="warning" title="Requires the Node compatibility flag">
-`node:crypto` is available in Workers only with `nodejs_compat` enabled.
+<Callout type="tip" title="No compatibility flag needed">
+Verification runs on the WebCrypto that Workers already provides, so
+`nodejs_compat` is not required. Use `passkeyWorker`, which builds the server
+per request because Workers hands bindings to `fetch` rather than to module
+scope:
 
-```toml
-# wrangler.toml
-compatibility_flags = ["nodejs_compat"]
-compatibility_date = "2024-09-23"
+```ts
+import { passkeyWorker } from 'passkify/cloudflare';
+
+export default {
+  fetch: passkeyWorker((env) => buildPasskeyServer(env), { basePath: '/passkey' }),
+};
 ```
-
-Test this on your target runtime before committing to it. If the flag is not
-available to you, run the passkify server half somewhere with a real Node
-runtime and keep the Worker in front of it.
 </Callout>
 
 ## No framework at all

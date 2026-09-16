@@ -213,19 +213,19 @@ export function DemoConsole() {
       {session?.signedIn && session.user && (
         <div className="p-lg">
           <p className="t-body text-on-primary">
-            Signed in as{' '}
-            <strong className="font-mono font-medium">{session.user.username}</strong>
+            Signed in as <strong className="font-mono font-medium">{session.user.username}</strong>
           </p>
-          <p className="mt-1 font-mono text-[12px] text-mute">
-            user handle {session.user.id}
-          </p>
+          <p className="mt-1 font-mono text-[12px] text-mute">user handle {session.user.id}</p>
 
           <p className="t-mono-caps mt-lg border-b border-hairline-soft pb-2 text-mute">
             Passkeys on this account
           </p>
           <ul className="divide-y divide-hairline-soft">
             {session.credentials?.map((credential) => (
-              <li key={credential.id} className="flex flex-wrap items-baseline gap-x-sm gap-y-1 py-sm">
+              <li
+                key={credential.id}
+                className="flex flex-wrap items-baseline gap-x-sm gap-y-1 py-sm"
+              >
                 <span className="font-mono text-[13px] text-ash">
                   {credential.id.slice(0, 14)}...
                 </span>

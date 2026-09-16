@@ -4,24 +4,87 @@ on:
   push:
     tags: ['v*']
 
-# Required for npm provenance: the OIDC token proves to the registry that this
-# tarball was built by this workflow, from this commit.
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   publish:
+    name: Publish to npm
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write   # creating the GitHub Release
+      id-token: write   # npm provenance: the OIDC token proves to the registry
+                        # that this tarball was built by this workflow, from
+                        # this commit.
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }
+
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
           registry-url: https://registry.npmjs.org
+
       - run: npm ci
-      # `prepublishOnly` runs typecheck and tests, which build dist/.
-      - run: npm publish -w passkify
+
+      # Publishing is driven by the manifest, not the tag, so a tag that
+      # disagrees with package.json would silently republish the old version.
+      - name: Tag matches the manifest version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          manifest=$(node -p "require('./packages/passkify/package.json').version")
+          echo "tag=$tag manifest=$manifest"
+          if [ "$tag" != "$manifest" ]; then
+            echo "::error::tag v$tag does not match package.json version $manifest"
+            exit 1
+          fi
+
+      - name: Verify
+        run: |
+          npx biome ci .
+          npm run typecheck
+          npm test -w passkify
+          npm run test:dist -w passkify
+
+      - name: Package health
+        run: |
+          npx --yes publint ./packages/passkify
+          npx --yes @arethetypeswrong/cli --pack ./packages/passkify --profile node16 --ignore-rules no-resolution
+
+      # A pre-release tag (v1.0.0-rc.1) goes to `next`, never to `latest`.
+      - name: Choose the dist-tag
+        id: disttag
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            *-*) echo "tag=next" >> "$GITHUB_OUTPUT" ;;
+            *)   echo "tag=latest" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Publish
+        run: npm publish -w passkify --tag ${{ steps.disttag.outputs.tag }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Extract the changelog entry
+        id: notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # The section for this version, up to the next `## [` heading.
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { capture = 1; next }
+            capture && /^## \[/ { exit }
+            capture { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "No changelog entry for $version." > release-notes.md
+          fi
+          cat release-notes.md
+
+      - name: Create the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          prerelease: ${{ steps.disttag.outputs.tag == 'next' }}
+          generate_release_notes: false

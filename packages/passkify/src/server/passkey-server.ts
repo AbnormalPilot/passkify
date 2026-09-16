@@ -13,7 +13,14 @@
  */
 
 import { PasskeyError } from '../shared/errors.js';
-import { resolveConfig, type PasskeyServerConfig, type ResolvedConfig } from './config.js';
+import { toBase64Url, utf8ToBytes } from '../shared/base64url.js';
+import {
+  resolveConfig,
+  assertResolvedConfig,
+  type PasskeyServerConfig,
+  type ResolvedConfig,
+} from './config.js';
+import { buildRelatedOrigins, WELL_KNOWN_WEBAUTHN_PATH } from './related-origin.js';
 import {
   createRegistrationOptions,
   verifyRegistration,
@@ -51,6 +58,7 @@ export class PasskeyServer {
 
   constructor(config: PasskeyServerConfig) {
     this.config = resolveConfig(config);
+    assertResolvedConfig(this.config);
   }
 
   /** The Relying Party ID in force. Handy when debugging an `rpid_mismatch`. */
@@ -61,6 +69,67 @@ export class PasskeyServer {
   /** The store this server was constructed with. */
   get store(): PasskeyStore {
     return this.config.store;
+  }
+
+  /** True when this server publishes a Related Origin Requests file. */
+  get publishesRelatedOrigins(): boolean {
+    return this.config.relatedOrigins !== null;
+  }
+
+  /**
+   * The body of `/.well-known/webauthn`, for serving it yourself.
+   *
+   * The adapters mount this automatically at the site root — it is a fixed
+   * absolute path and cannot live under `basePath`. Use this directly if your
+   * `/.well-known` routes are handled elsewhere, or write it to a static file
+   * at build time.
+   *
+   * Returns `null` when `relatedOrigins` is off.
+   */
+  relatedOrigins(): { origins: string[] } | null {
+    if (!this.config.relatedOrigins) return null;
+    return buildRelatedOrigins(this.config.rpID, this.config.origins, this.config.relatedOrigins);
+  }
+
+  /** The path browsers fetch: `/.well-known/webauthn`. Fixed by the specification. */
+  static readonly wellKnownPath = WELL_KNOWN_WEBAUTHN_PATH;
+
+  /**
+   * Everything the browser needs to reconcile its passkey list for one account.
+   *
+   * WebAuthn Level 3 lets a page tell the platform which credentials still
+   * exist (`signalAllAcceptedCredentials`) and what the account is called
+   * (`signalCurrentUserDetails`). Without it, a passkey the user deleted on
+   * your site sits in their OS picker forever, and picking it fails.
+   *
+   * Returns `null` when the account has no credentials. That is deliberate and
+   * important: an empty `allAcceptedCredentialIds` is not "nothing to say", it
+   * is an instruction to the platform to **delete every passkey for this user**.
+   * A store returning nothing because of a bug must not become mass credential
+   * deletion, so the caller is given nothing to signal rather than an empty list.
+   */
+  async signals(userId: string): Promise<{
+    rpId: string;
+    userId: string;
+    name: string;
+    displayName: string;
+    allAcceptedCredentialIds: string[];
+  } | null> {
+    const user = await this.config.store.getUserById(userId);
+    if (!user) {
+      throw new PasskeyError('unknown_user', `no account with id "${userId}"`);
+    }
+
+    const credentials = await this.config.store.listCredentialsByUserId(userId);
+    if (credentials.length === 0) return null;
+
+    return {
+      rpId: this.config.rpID,
+      userId: toBase64Url(utf8ToBytes(user.id)),
+      name: user.username,
+      displayName: user.displayName,
+      allAcceptedCredentialIds: credentials.map((credential) => credential.id),
+    };
   }
 
   /**
@@ -94,9 +163,7 @@ export class PasskeyServer {
    * Verify an assertion. On success the returned `user` is authenticated —
    * establish your session (cookie, JWT, whatever you already use) from here.
    */
-  finishAuthentication(
-    response: AuthenticationResponseJSON,
-  ): Promise<VerifyAuthenticationResult> {
+  finishAuthentication(response: AuthenticationResponseJSON): Promise<VerifyAuthenticationResult> {
     return verifyAuthentication(this.config, response);
   }
 

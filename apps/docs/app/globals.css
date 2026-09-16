@@ -493,7 +493,7 @@
   white-space: nowrap;
   color: var(--ink);
 }
-.prose :not(pre) > code span { color: inherit !important; }
+.prose :not(pre) > code span { color: inherit; }
 .prose a :not(pre) > code { color: inherit; }
 
 /* Code is framed as application chrome, not as a marketing card: dark ground,

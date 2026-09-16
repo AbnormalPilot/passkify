@@ -12,7 +12,10 @@ const Command = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <CommandPrimitive
     ref={ref}
-    className={cn('flex h-full w-full flex-col overflow-hidden rounded-lg bg-popover text-popover-foreground', className)}
+    className={cn(
+      'flex h-full w-full flex-col overflow-hidden rounded-lg bg-popover text-popover-foreground',
+      className,
+    )}
     {...props}
   />
 ));
@@ -73,7 +76,11 @@ const CommandEmpty = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive.Empty>,
   React.ComponentPropsWithoutRef<typeof CommandPrimitive.Empty>
 >((props, ref) => (
-  <CommandPrimitive.Empty ref={ref} className="py-8 text-center text-sm text-muted-foreground" {...props} />
+  <CommandPrimitive.Empty
+    ref={ref}
+    className="py-8 text-center text-sm text-muted-foreground"
+    {...props}
+  />
 ));
 CommandEmpty.displayName = CommandPrimitive.Empty.displayName;
 
@@ -81,7 +88,11 @@ const CommandGroup = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive.Group>,
   React.ComponentPropsWithoutRef<typeof CommandPrimitive.Group>
 >(({ className, ...props }, ref) => (
-  <CommandPrimitive.Group ref={ref} className={cn('overflow-hidden p-1 text-foreground', className)} {...props} />
+  <CommandPrimitive.Group
+    ref={ref}
+    className={cn('overflow-hidden p-1 text-foreground', className)}
+    {...props}
+  />
 ));
 CommandGroup.displayName = CommandPrimitive.Group.displayName;
 
@@ -92,7 +103,7 @@ const CommandItem = React.forwardRef<
   <CommandPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex cursor-pointer select-none items-center gap-2 rounded-sm text-sm outline-none data-[disabled=true]:pointer-events-none data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[disabled=true]:opacity-50",
+      'relative flex cursor-pointer select-none items-center gap-2 rounded-sm text-sm outline-none data-[disabled=true]:pointer-events-none data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[disabled=true]:opacity-50',
       className,
     )}
     {...props}
@@ -100,4 +111,12 @@ const CommandItem = React.forwardRef<
 ));
 CommandItem.displayName = CommandPrimitive.Item.displayName;
 
-export { Command, CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem };
+export {
+  Command,
+  CommandDialog,
+  CommandInput,
+  CommandList,
+  CommandEmpty,
+  CommandGroup,
+  CommandItem,
+};

@@ -13,27 +13,36 @@ export async function request<T>(
   config: ResolvedClientConfig,
   path: string,
   body: unknown,
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE' = 'POST',
 ): Promise<T> {
   const doFetch = config.fetch ?? globalThis.fetch;
   const url = `${config.baseUrl.replace(/\/$/, '')}${path}`;
+  const sendsBody = method !== 'GET' && method !== 'DELETE';
 
   let response: Response;
   try {
     response = await doFetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...config.headers },
+      method,
+      headers: sendsBody
+        ? { 'content-type': 'application/json', ...config.headers }
+        : { ...config.headers },
       credentials: config.credentials ?? 'same-origin',
-      body: JSON.stringify(body ?? {}),
+      ...(sendsBody ? { body: JSON.stringify(body ?? {}) } : {}),
     });
   } catch (cause) {
     throw new PasskeyError('server_error', `could not reach ${url}`, { cause });
   }
 
+  // 204 carries no body, and calling .json() on one throws.
   let payload: unknown;
-  try {
-    payload = await response.json();
-  } catch {
+  if (response.status === 204) {
     payload = undefined;
+  } else {
+    try {
+      payload = await response.json();
+    } catch {
+      payload = undefined;
+    }
   }
 
   if (!response.ok) {

@@ -68,3 +68,48 @@ export function assertSupported(): void {
     );
   }
 }
+
+/**
+ * `PublicKeyCredential.getClientCapabilities()` — WebAuthn Level 3.
+ *
+ * One call replacing a pile of separate probes: the browser reports what it can
+ * do, including things that were previously undetectable such as whether the
+ * platform authenticator is present *and* enrolled, and whether the signal
+ * methods exist.
+ *
+ * Detect at runtime and branch on what comes back. Do not hard-code a browser
+ * matrix — capability names are extensible and the set differs by platform, not
+ * just by engine.
+ *
+ * On browsers without it, the three legacy probes are used to synthesise the
+ * capabilities passkify can determine, and the rest are simply absent.
+ */
+export async function getCapabilities(): Promise<Record<string, boolean>> {
+  if (!isSupported()) return {};
+
+  const api = window.PublicKeyCredential as unknown as {
+    getClientCapabilities?: () => Promise<Record<string, boolean>>;
+  };
+
+  if (typeof api.getClientCapabilities === 'function') {
+    try {
+      return await api.getClientCapabilities();
+    } catch {
+      // Fall through to the legacy probes below.
+    }
+  }
+
+  const [platformAuthenticator, conditionalGet] = await Promise.all([
+    isPlatformAuthenticatorAvailable(),
+    isAutofillAvailable(),
+  ]);
+
+  const signalApi = window.PublicKeyCredential as unknown as Record<string, unknown>;
+  return {
+    userVerifyingPlatformAuthenticator: platformAuthenticator,
+    conditionalGet,
+    signalAllAcceptedCredentials: typeof signalApi.signalAllAcceptedCredentials === 'function',
+    signalCurrentUserDetails: typeof signalApi.signalCurrentUserDetails === 'function',
+    signalUnknownCredential: typeof signalApi.signalUnknownCredential === 'function',
+  };
+}

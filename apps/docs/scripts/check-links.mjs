@@ -16,11 +16,20 @@ const DOCS = 'app/docs';
 
 /** Mirrors the slugify in components/docs-components.tsx. */
 const apiSlug = (value) =>
-  value.replace(/[^\w\s.-]/g, '').trim().replace(/[\s.]+/g, '-').toLowerCase();
+  value
+    .replace(/[^\w\s.-]/g, '')
+    .trim()
+    .replace(/[\s.]+/g, '-')
+    .toLowerCase();
 
 /** Mirrors rehype-slug's behaviour for markdown headings. */
 const headingSlug = (value) =>
-  value.replace(/`/g, '').replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-').toLowerCase();
+  value
+    .replace(/`/g, '')
+    .replace(/[^\w\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .toLowerCase();
 
 const pages = new Map();
 
